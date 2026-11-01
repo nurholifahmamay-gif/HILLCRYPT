@@ -1,0 +1,881 @@
+import base64
+import json
+from datetime import datetime
+from pathlib import Path
+
+import pandas as pd
+import streamlit as st
+
+from hill_cipher import (
+    MODES, create_package, decrypt_package, decode_plaintext,
+    encode_plaintext, derive_key_matrix, matrix_inverse_mod,
+    matrix_determinant, decrypt_bytes
+)
+
+st.set_page_config(
+    page_title="HILLCRYPT 4.2 | Matrix Cryptography",
+    page_icon="🔐",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# ---------- Language ----------
+LANG = {
+"id": {
+ "home":"Beranda","enc":"Enkripsi","dec":"Dekripsi","lab":"Laboratorium Matriks",
+ "learn":"Belajar Kriptografi","test":"Uji Sistem","about":"Tentang",
+ "encoding":"Mode Encoding","matrix":"Pengaturan Matriks","order":"Ordo matriks (n × n)",
+ "key":"Kata kunci (passphrase)","system":"Informasi Sistem","hero":"Platform Pembelajaran Kriptografi Matriks",
+ "hero_sub":"Pelajari matematika. Pahami kriptografi. Eksplorasi transformasi pesan.",
+ "welcome":"Selamat datang di HILLCRYPT","home_desc":"Platform edukasi interaktif untuk mempelajari Hill Cipher melalui aljabar linear dan aritmetika modulo.",
+ "encryption":"Enkripsi Pesan","decryption":"Dekripsi Pesan","encrypt_desc":"Ubah plaintext menjadi ciphertext menggunakan matriks kunci yang dapat dikustomisasi.",
+ "decrypt_desc":"Pulihkan ciphertext menjadi plaintext dengan matriks invers modular.",
+ "plain":"Plaintext / Pesan asli","cipher":"Ciphertext / Paket","paste":"Tempel teks atau paket ciphertext di sini...",
+ "upload_plain":"Unggah file plaintext (.txt)","upload_cipher":"Unggah paket ciphertext (.hce / .json)",
+ "encrypt_now":"ENKRIPSI SEKARANG","decrypt_now":"DEKRIPSI SEKARANG","result":"Hasil Dekripsi",
+ "copy_hint":"Paket JSON menyimpan encoding, ordo matriks, panjang byte asli, dan ciphertext sehingga dapat dipulihkan tanpa menebak parameter.",
+ "raw_mode":"Jika hanya memiliki Base64 mentah, isi juga encoding, ordo, dan panjang byte asli.",
+ "package_mode":"Paket HILLCRYPT (JSON / HCE)","raw_b64":"Ciphertext Base64 mentah",
+ "original_len":"Panjang byte plaintext asli","success_enc":"Enkripsi berhasil. Simpan atau salin paket untuk proses dekripsi.",
+ "success_dec":"Dekripsi berhasil. Plaintext berhasil dipulihkan.",
+ "download_pkg":"Unduh paket ciphertext (.hce)","download_text":"Unduh plaintext (.txt)",
+ "equations":"Persamaan Dasar Hill Cipher","flow":"Alur Proses","encrypt":"Enkripsi (Encryption)","decrypt":"Dekripsi (Decryption)",
+ "condition":"Syarat matriks kunci invertibel:","plain_vector":"vektor plaintext","cipher_vector":"vektor ciphertext","key_matrix":"matriks kunci berordo n × n","modulus":"modulus encoding",
+ "encoding_info":"Pilih ASCII untuk kode 0–127, Windows-1252 untuk karakter satu-byte CP1252, atau UTF-8 untuk seluruh karakter Unicode.",
+ "start":"Mulai eksplorasi","long":"Teks panjang didukung selama kapasitas memori dan batas unggah perangkat mencukupi.",
+ "matrix_show":"Tampilkan matriks kunci dan validasi","matrix_ok":"Matriks kunci invertibel modulo",
+ "bad_cipher":"Ciphertext tidak valid atau metadata tidak cocok.",
+ "learn_intro":"Materi ringkas untuk memahami konsep dan matematika di balik Hill Cipher.",
+ "about_desc":"HILLCRYPT adalah media pembelajaran interaktif yang menghubungkan kriptografi klasik dengan aljabar linear dan aritmetika modulo.",
+ "local_note":"Mode lokal memproses data pada komputer yang menjalankan aplikasi. Jika dipublikasikan, data diproses oleh server hosting.",
+ "warning":"Hill Cipher merupakan algoritma klasik untuk edukasi, bukan perlindungan data rahasia. Gunakan enkripsi modern terautentikasi untuk keamanan nyata.",
+ "roundtrip":"JALANKAN UJI ROUND-TRIP","pass":"PASS — hasil dekripsi identik dengan plaintext awal.",
+ "no_text":"Belum ada teks.","details":"Detail hasil","matrix_title":"Matriks kunci",
+ "download_raw":"Unduh ciphertext Base64 (.txt)","input_method":"Metode input","text_package":"Teks / Paket JSON","file":"Unggah File",
+ "language":"Bahasa","system_encoding":"Encoding aktif","block":"Ukuran blok","bytes":"byte",
+ "key_help":"Kata kunci dapat dikustomisasi. Gunakan kata kunci yang sama saat dekripsi; menggantinya tidak akan mengubah pengaturan encoding atau fitur lain.",
+ "matrix_minus":"Kurangi ordo matriks","matrix_plus":"Tambah ordo matriks",
+ "cipher_only":"Ciphertext saja (Base64)","cipher_copy_help":"Salin hanya teks Base64 berikut untuk dibagikan atau ditempel pada mode Base64 mentah.",
+ "chars":"karakter","byte":"byte","empty_text":"Belum ada teks. Jumlah saat ini: 0 karakter · 0 byte.",
+ "auto_length":"Panjang byte dibaca otomatis dari paket HILLCRYPT. Untuk Base64 mentah, panjang asli tidak tersimpan sehingga tidak dapat diketahui secara pasti.",
+ "manual_raw_length":"Panjang byte asli (khusus Base64 mentah; diperlukan untuk menghapus padding secara tepat)",
+ "manual_calc":"Kalkulator Matriks Manual","manual_calc_desc":"Masukkan dua matriks persegi, lalu hitung hasil perkalian modulo encoding yang sedang dipilih.",
+ "matrix_a":"Matriks A","matrix_b":"Matriks B","calculate":"Hitung A × B modulo m","manual_result":"Hasil A × B (mod m)",
+ "vector_calc":"Simulasi perkalian K dengan vektor plaintext","vector_input":"Masukkan elemen vektor P dipisahkan koma",
+ "vector_help":"Masukkan tepat n bilangan bulat. Nilai akan direduksi modulo m.",
+ "vector_result":"Vektor ciphertext C","calculation_steps":"Langkah perhitungan per baris",
+ "graph_title":"Visualisasi Graf Berbobot dari Matriks Kunci","graph_desc":"Setiap simpul mewakili indeks baris/kolom. Sisi berarah i → j ditampilkan jika entri Kᵢⱼ tidak nol; bobot sisi adalah Kᵢⱼ modulo m.",
+ "graph_empty":"Matriks ini tidak memiliki sisi berbobot nonnol untuk divisualisasikan.",
+ "graph_limit":"Visualisasi dibatasi sampai ordo 12 agar graf tetap terbaca.",
+ "ascii_title":"Tabel ASCII dan Windows-1252","ascii_desc":"Jelajahi kode desimal, heksadesimal, biner, dan karakter. Kode kontrol ASCII ditampilkan dengan nama standarnya.",
+ "ascii_range":"Rentang tabel","ascii_search":"Cari kode atau karakter","ascii_standard":"ASCII standar (0–127)","ascii_extended":"Windows-1252 (128–255)","ascii_all":"Gabungan 0–255",
+ "about_key":"Kunci dan validasi","about_padding":"Pembagian blok dan padding","about_encoding":"Encoding teks","about_graph":"Hubungan matriks dan graf","about_security":"Batas keamanan",
+ "dashboard_matrix":"Ordo matriks","roundtrip_formula":"D_K(E_K(P)) = P","roundtrip_label":"Uji pemulihan plaintext","matrix_card_desc":"Ordo matriks persegi dapat dikustomisasi.",
+ "history":"Riwayat Aktivitas",
+ "history_desc":"Riwayat proses enkripsi dan dekripsi pada sesi aplikasi ini.",
+ "history_empty":"Belum ada aktivitas yang tercatat pada sesi ini.",
+ "history_clear_one":"Hapus riwayat",
+ "history_clear_all":"Hapus semua riwayat",
+ "memory_clear":"Bersihkan memori sementara",
+ "memory_clear_help":"Menghapus riwayat, hasil operasi terakhir, dan data sementara dalam sesi aplikasi.",
+ "memory_done":"Memori sementara dan riwayat sesi telah dibersihkan.",
+ "history_time":"Waktu",
+ "history_operation":"Operasi",
+ "history_encoding":"Encoding",
+ "history_order":"Ordo",
+ "history_chars":"Karakter",
+ "history_bytes":"Byte",
+ "history_status":"Status",
+ "graph_operation_title":"Graf Transformasi Operasi Terakhir",
+ "graph_encrypt_title":"Graf Transformasi Enkripsi",
+ "graph_decrypt_title":"Graf Transformasi Dekripsi",
+ "graph_operation_desc":"Graf bipartit berarah ini menunjukkan kontribusi setiap komponen vektor masukan terhadap setiap komponen vektor keluaran. Bobot sisi berasal dari entri matriks transformasi modulo m.",
+ "graph_no_operation":"Belum ada operasi enkripsi atau dekripsi pada sesi ini. Lakukan enkripsi atau dekripsi terlebih dahulu agar graf transformasi dapat dibentuk.",
+ "graph_input":"Vektor masukan",
+ "graph_output":"Vektor keluaran","graph_first_block":"Graf menampilkan blok pertama dari operasi terakhir sebagai contoh visual. Blok berikutnya diproses dengan matriks transformasi yang sama.",
+ "graph_encrypt_caption":"Enkripsi: simpul Pⱼ terhubung ke Cᵢ dengan bobot kᵢⱼ.",
+ "graph_decrypt_caption":"Dekripsi: simpul Cⱼ terhubung ke Pᵢ dengan bobot (K⁻¹)ᵢⱼ.",
+ "copyright":"© 2026 Mamay Nurholifah. HILLCRYPT – Platform Pembelajaran Kriptografi Matriks. Hak cipta dilindungi.",
+ "copyright_note":"Pemberitahuan hak cipta aplikasi. Komponen dan pustaka pihak ketiga tetap mengikuti lisensinya masing-masing.",
+ "history_privacy":"Riwayat hanya menyimpan metadata aktivitas. Plaintext, ciphertext, dan kata kunci tidak disimpan dalam riwayat.",
+ "equation_symbols":"Keterangan simbol",
+ "symbol_n":"n: ordo matriks kunci dan panjang setiap blok vektor.",
+ "symbol_m":"m: modulus yang ditentukan oleh mode encoding.",
+ "symbol_p":"P: vektor kolom plaintext; pⱼ adalah komponen ke-j.",
+ "symbol_c":"C: vektor kolom ciphertext; cᵢ adalah komponen ke-i.",
+ "symbol_k":"K: matriks kunci berordo n × n; kᵢⱼ adalah elemen baris ke-i kolom ke-j.",
+ "symbol_kinv":"K⁻¹: invers modular matriks kunci K.",
+ "symbol_ek":"Eₖ: fungsi enkripsi menggunakan matriks kunci K.",
+ "symbol_dk":"Dₖ: fungsi dekripsi menggunakan invers modular K⁻¹.",
+ "symbol_det":"det(K): determinan matriks K; gcd(det(K),m)=1 merupakan syarat invertibilitas.",
+ "language_id":"Bahasa Indonesia","language_en":"Bahasa Inggris",
+ "matrix_formula":"Invers matriks modular","inverse_formula":"Rumus invers matriks modular",
+ "ascii_decimal":"Desimal","ascii_hex":"Heksadesimal","ascii_binary":"Biner","ascii_character":"Karakter","ascii_type":"Jenis",
+ "ascii_control":"Kontrol","ascii_printable":"Dapat dicetak","ascii_cp1252":"Windows-1252","ascii_undefined":"Tidak terdefinisi",
+ "order_label":"Ordo","manual_expected":"Masukkan tepat",
+ "hero_eyebrow":"KRIPTOGRAFI MATRIKS · BELAJAR · EKSPLORASI · EKSPERIMEN",
+ "hero_tagline":"Jelajahi Matematika. Pahami Kriptografi. Lindungi Informasi.",
+ "long_desc":"Teks panjang didukung selama kapasitas memori dan batas perangkat mencukupi.",
+ "lab_desc":"Eksplorasi matriks kunci, determinan, dan invers modular.",
+ "test_desc":"Verifikasi konsistensi enkripsi dan dekripsi.",
+ "nav_heading":"NAVIGASI","platform_subtitle":"PLATFORM KRIPTOGRAFI MATRIKS",
+ "metric_characters":"Karakter","metric_cipherbytes":"Byte ciphertext","metric_matrixorder":"Ordo matriks",
+ "loaded_file":"File berhasil dimuat","package_expander":"Lihat isi paket ciphertext",
+ "raw_info":"Jika hanya memiliki Base64 mentah, isi juga encoding, ordo matriks, dan panjang byte asli.",
+ "raw_placeholder":"Tempel ciphertext Base64 saja…",
+ "about_objectives":"Tujuan pembelajaran","about_obj_1":"Memahami plaintext, ciphertext, enkripsi, dan dekripsi.",
+ "about_obj_2":"Merepresentasikan teks sebagai byte dan vektor kolom.",
+ "about_obj_3":"Mengeksplorasi perkalian matriks dan aritmetika modulo.",
+ "about_obj_4":"Memeriksa determinan dan syarat invers modular.",
+ "about_obj_5":"Membandingkan encoding ASCII, Windows-1252, dan UTF-8.",
+ "cross_device":"Akses lintas perangkat","cross_device_desc":"Publikasikan proyek Streamlit ini ke hosting publik agar dapat diakses melalui browser dari Windows, Android, iOS, dan perangkat lain. Tambahkan URL publik ke layar utama ponsel agar terasa seperti aplikasi.",
+},
+"en": {
+ "home":"Home","enc":"Encryption","dec":"Decryption","lab":"Matrix Laboratory",
+ "learn":"Learn Cryptography","test":"System Test","about":"About",
+ "encoding":"Encoding Mode","matrix":"Matrix Settings","order":"Matrix order (n × n)",
+ "key":"Key / Passphrase","system":"System Information","hero":"Matrix Cryptography Learning Platform",
+ "hero_sub":"Explore mathematics. Understand cryptography. Experiment with message transformations.",
+ "welcome":"Welcome to HILLCRYPT","home_desc":"An interactive learning platform for the Hill Cipher using linear algebra and modular arithmetic.",
+ "encryption":"Message Encryption","decryption":"Message Decryption","encrypt_desc":"Transform plaintext into ciphertext using a customizable key matrix.",
+ "decrypt_desc":"Recover plaintext from ciphertext using the modular inverse matrix.",
+ "plain":"Plaintext / Original message","cipher":"Ciphertext / Package","paste":"Paste ciphertext text or package here...",
+ "upload_plain":"Upload plaintext file (.txt)","upload_cipher":"Upload ciphertext package (.hce / .json)",
+ "encrypt_now":"ENCRYPT NOW","decrypt_now":"DECRYPT NOW","result":"Decryption Result",
+ "copy_hint":"The JSON package stores encoding, matrix order, original byte length, and ciphertext so it can be restored without guessing parameters.",
+ "raw_mode":"If you only have raw Base64, also provide encoding, matrix order, and original byte length.",
+ "package_mode":"HILLCRYPT Package (JSON / HCE)","raw_b64":"Raw Base64 Ciphertext",
+ "original_len":"Original plaintext byte length","success_enc":"Encryption successful. Save or copy the package for decryption.",
+ "success_dec":"Decryption successful. Plaintext has been restored.",
+ "download_pkg":"Download ciphertext package (.hce)","download_text":"Download plaintext (.txt)",
+ "equations":"Hill Cipher Core Equations","flow":"Process Flow","encrypt":"Encryption","decrypt":"Decryption",
+ "condition":"Key matrix invertibility condition:","plain_vector":"plaintext vector","cipher_vector":"ciphertext vector","key_matrix":"n × n key matrix","modulus":"encoding modulus",
+ "encoding_info":"Choose ASCII for codes 0–127, Windows-1252 for one-byte CP1252 characters, or UTF-8 for all Unicode characters.",
+ "start":"Explore features","long":"Long text is supported within the memory and upload limits of the device.",
+ "matrix_show":"Show key matrix and validation","matrix_ok":"Key matrix is invertible modulo",
+ "bad_cipher":"Ciphertext is invalid or its metadata does not match.",
+ "learn_intro":"Learning materials to understand the concepts and mathematics behind the Hill Cipher.",
+ "about_desc":"HILLCRYPT is an interactive learning resource connecting classical cryptography with linear algebra and modular arithmetic.",
+ "local_note":"Local mode processes data on the computer running the app. When publicly hosted, data is processed by the hosting server.",
+ "warning":"Hill Cipher is a classical educational algorithm, not a method for protecting confidential data. Use modern authenticated encryption for real security.",
+ "roundtrip":"RUN ROUND-TRIP TEST","pass":"PASS — decrypted result matches the original plaintext.",
+ "no_text":"No text yet.","details":"Result details","matrix_title":"Key matrix",
+ "download_raw":"Download Base64 ciphertext (.txt)","input_method":"Input method","text_package":"Text / JSON Package","file":"Upload File",
+ "language":"Language","system_encoding":"Active encoding","block":"Block size","bytes":"bytes",
+ "key_help":"The key can be customized. Use the same key for decryption; changing it does not alter the encoding settings or other features.",
+ "matrix_minus":"Decrease matrix order","matrix_plus":"Increase matrix order",
+ "cipher_only":"Ciphertext only (Base64)","cipher_copy_help":"Copy only the Base64 text below to share it or paste it into raw Base64 mode.",
+ "chars":"characters","byte":"bytes","empty_text":"No text yet. Current count: 0 characters · 0 bytes.",
+ "auto_length":"The byte length is read automatically from a HILLCRYPT package. Raw Base64 does not store the original length, so it cannot be determined exactly.",
+ "manual_raw_length":"Original byte length (raw Base64 only; required to remove padding exactly)",
+ "manual_calc":"Manual Matrix Calculator","manual_calc_desc":"Enter two square matrices, then calculate their product modulo the currently selected encoding modulus.",
+ "matrix_a":"Matrix A","matrix_b":"Matrix B","calculate":"Calculate A × B modulo m","manual_result":"A × B result (mod m)",
+ "vector_calc":"Simulate multiplication of K by a plaintext vector","vector_input":"Enter vector P elements separated by commas",
+ "vector_help":"Enter exactly n integers. Values will be reduced modulo m.",
+ "vector_result":"Ciphertext vector C","calculation_steps":"Row-by-row calculation steps",
+ "graph_title":"Weighted Graph Visualization of the Key Matrix","graph_desc":"Each vertex represents a row/column index. A directed edge i → j appears when Kᵢⱼ is nonzero; its weight is Kᵢⱼ modulo m.",
+ "graph_empty":"This matrix has no nonzero weighted edges to visualize.",
+ "graph_limit":"Visualization is limited to order 12 to keep the graph readable.",
+ "ascii_title":"ASCII and Windows-1252 Table","ascii_desc":"Explore decimal, hexadecimal, binary codes, and characters. ASCII control codes are displayed using their standard names.",
+ "ascii_range":"Table range","ascii_search":"Search code or character","ascii_standard":"Standard ASCII (0–127)","ascii_extended":"Windows-1252 (128–255)","ascii_all":"Combined 0–255",
+ "about_key":"Key and validation","about_padding":"Block division and padding","about_encoding":"Text encoding","about_graph":"Connection between matrices and graphs","about_security":"Security limitations",
+ "dashboard_matrix":"Matrix order","roundtrip_formula":"D_K(E_K(P)) = P","roundtrip_label":"Plaintext recovery test","matrix_card_desc":"Customizable square matrix order.",
+ "history":"Activity History",
+ "history_desc":"Encryption and decryption activity recorded during this app session.",
+ "history_empty":"No activity has been recorded in this session yet.",
+ "history_clear_one":"Delete history item",
+ "history_clear_all":"Delete all history",
+ "memory_clear":"Clear temporary memory",
+ "memory_clear_help":"Clears history, the latest operation result, and temporary data stored in this app session.",
+ "memory_done":"Temporary session memory and history have been cleared.",
+ "history_time":"Time",
+ "history_operation":"Operation",
+ "history_encoding":"Encoding",
+ "history_order":"Order",
+ "history_chars":"Characters",
+ "history_bytes":"Bytes",
+ "history_status":"Status",
+ "graph_operation_title":"Latest Operation Transformation Graph",
+ "graph_encrypt_title":"Encryption Transformation Graph",
+ "graph_decrypt_title":"Decryption Transformation Graph",
+ "graph_operation_desc":"This directed bipartite graph shows how each input-vector component contributes to each output-vector component. Edge weights come from the transformation matrix modulo m.",
+ "graph_no_operation":"No encryption or decryption has been performed in this session. Run an operation first to build its transformation graph.",
+ "graph_input":"Input vector",
+ "graph_output":"Output vector","graph_first_block":"The graph displays the first block of the latest operation as a visual example. Subsequent blocks use the same transformation matrix.",
+ "graph_encrypt_caption":"Encryption: each Pⱼ vertex connects to Cᵢ with weight kᵢⱼ.",
+ "graph_decrypt_caption":"Decryption: each Cⱼ vertex connects to Pᵢ with weight (K⁻¹)ᵢⱼ.",
+ "copyright":"© 2026 Mamay Nurholifah. HILLCRYPT – Matrix Cryptography Learning Platform. All rights reserved.",
+ "copyright_note":"Application copyright notice. Third-party components and libraries remain subject to their respective licenses.",
+ "history_privacy":"History stores activity metadata only. Plaintext, ciphertext, and passphrases are not stored in history.",
+ "equation_symbols":"Symbol definitions",
+ "symbol_n":"n: order of the key matrix and length of each vector block.",
+ "symbol_m":"m: modulus determined by the selected encoding mode.",
+ "symbol_p":"P: plaintext column vector; pⱼ is its j-th component.",
+ "symbol_c":"C: ciphertext column vector; cᵢ is its i-th component.",
+ "symbol_k":"K: n × n key matrix; kᵢⱼ is the entry in row i, column j.",
+ "symbol_kinv":"K⁻¹: modular inverse of the key matrix K.",
+ "symbol_ek":"Eₖ: encryption function using key matrix K.",
+ "symbol_dk":"Dₖ: decryption function using modular inverse K⁻¹.",
+ "symbol_det":"det(K): determinant of K; gcd(det(K),m)=1 is the invertibility condition.",
+ "language_id":"Indonesian","language_en":"English",
+ "matrix_formula":"Modular matrix inverse","inverse_formula":"Modular matrix inverse formula",
+ "ascii_decimal":"Decimal","ascii_hex":"Hexadecimal","ascii_binary":"Binary","ascii_character":"Character","ascii_type":"Type",
+ "ascii_control":"Control","ascii_printable":"Printable","ascii_cp1252":"Windows-1252","ascii_undefined":"Undefined",
+ "order_label":"Order","manual_expected":"Enter exactly",
+ "hero_eyebrow":"MATRIX CRYPTOGRAPHY · LEARN · EXPLORE · EXPERIMENT",
+ "hero_tagline":"Explore Mathematics. Understand Cryptography. Protect Information.",
+ "long_desc":"Long text is supported within the available memory and device limits.",
+ "lab_desc":"Explore key matrices, determinants, and modular inverses.",
+ "test_desc":"Verify encryption and decryption consistency.",
+ "nav_heading":"NAVIGATION","platform_subtitle":"MATRIX CRYPTOGRAPHY PLATFORM",
+ "metric_characters":"Characters","metric_cipherbytes":"Ciphertext bytes","metric_matrixorder":"Matrix order",
+ "loaded_file":"File loaded successfully","package_expander":"View ciphertext package",
+ "raw_info":"If you only have raw Base64, also provide the encoding, matrix order, and original byte length.",
+ "raw_placeholder":"Paste Base64 ciphertext only…",
+ "about_objectives":"Learning objectives","about_obj_1":"Understand plaintext, ciphertext, encryption, and decryption.",
+ "about_obj_2":"Represent text as bytes and column vectors.",
+ "about_obj_3":"Explore matrix multiplication and modular arithmetic.",
+ "about_obj_4":"Check determinants and modular invertibility.",
+ "about_obj_5":"Compare ASCII, Windows-1252, and UTF-8 encodings.",
+ "cross_device":"Cross-device access","cross_device_desc":"Deploy this Streamlit project to a public host to access it through a browser on Windows, Android, iOS, and other devices. Add the public URL to your phone's home screen for an app-like experience.",
+}
+}
+if "language" not in st.session_state:
+    st.session_state.language = "id"
+lang_choice = st.sidebar.radio(
+    "Bahasa / Language", ["🇮🇩 Indonesia", "🇬🇧 English"],
+    index=0 if st.session_state.language == "id" else 1,
+    horizontal=True, label_visibility="visible", key="language_choice"
+)
+st.session_state.language = "id" if lang_choice.startswith("🇮🇩") else "en"
+T = LANG[st.session_state.language]
+def tr(k):
+    return T.get(k, k)
+
+# ---------- Styling ----------
+ASSET = Path(__file__).parent / "assets" / "cyber_background.svg"
+bg_uri = ""
+if ASSET.exists():
+    import base64 as _b64
+    bg_uri = "data:image/svg+xml;base64," + _b64.b64encode(ASSET.read_bytes()).decode()
+st.markdown(f"""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+html, body, [class*="css"] {{ font-family:'DM Sans',sans-serif; }}
+.stApp {{ background:linear-gradient(145deg,#07182d 0%,#0b2340 23%,#edf3f9 23.1%,#f4f7fb 100%); color:#173650; }}
+.block-container {{ max-width:1440px; padding-top:1.15rem; padding-bottom:3rem; }}
+[data-testid="stHeader"] {{ background:transparent !important; border:0 !important; box-shadow:none !important; backdrop-filter:none !important; }}
+[data-testid="stToolbar"] {{ background:transparent !important; }}
+[data-testid="stDecoration"] {{ display:none !important; }}
+[data-testid="stSidebar"] {{ background:linear-gradient(180deg,#07182d 0%,#123b63 100%); border-right:1px solid rgba(70,190,230,.28); }}
+[data-testid="stSidebar"] * {{ color:#eaf4ff; }}
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stSidebar"] label {{ color:#eaf4ff !important; }}
+.hero {{
+ border-radius:23px; padding:2.35rem 2.5rem;
+ background-image:linear-gradient(90deg,rgba(5,20,39,.97) 0%,rgba(8,39,68,.86) 58%,rgba(8,39,68,.58)),url("{bg_uri}");
+ background-size:cover; background-position:center; color:white; margin-bottom:1.35rem;
+ min-height:205px; box-shadow:0 15px 40px rgba(6,23,43,.20); border:1px solid rgba(67,194,235,.38);
+}}
+.hero h1 {{ font-family:'Space Grotesk'; font-size:clamp(2.2rem,5vw,3.4rem); letter-spacing:.07em; color:white; margin:0; }}
+.hero p {{ color:#d9edf9; margin:.5rem 0; }}
+.eyebrow {{ color:#71d7e7 !important; font-size:.72rem; letter-spacing:.18em; font-weight:700; }}
+h1,h2,h3,h4 {{ font-family:'Space Grotesk','DM Sans',sans-serif; color:#123653; }}
+.section-banner {{
+ border-radius:18px; padding:1.25rem 1.55rem;
+ background-image:linear-gradient(90deg,rgba(5,20,39,.97),rgba(8,39,68,.84)),url("{bg_uri}");
+ background-size:cover; background-position:center; color:#fff; margin:0 0 1.25rem;
+ border:1px solid rgba(42,164,207,.35); box-shadow:0 9px 26px rgba(10,35,60,.12);
+}}
+.section-banner h1 {{ color:#fff; margin:0; font-size:clamp(1.45rem,3vw,2rem); }}
+.section-banner p {{ color:#d9edf9; margin:.45rem 0 0; }}
+.card,.panel,.kpi {{ background:#fff; border:1px solid #dce6f0; border-radius:17px; padding:1.15rem 1.3rem; box-shadow:0 7px 22px rgba(15,44,73,.07); margin-bottom:.8rem; }}
+.kpi .value,.kpi .v {{ font-size:1.9rem; font-weight:750; color:#123b63; font-family:'Space Grotesk'; }}
+.kpi .label,.kpi .l,.kpi .desc,.muted,.small-muted {{ color:#687d91; font-size:.88rem; }}
+/* High-contrast editable fields in both main content and sidebar. */
+div[data-baseweb="input"] input, div[data-baseweb="textarea"] textarea,
+div[data-baseweb="select"] > div, div[data-baseweb="select"] input,
+[data-testid="stNumberInput"] input, [data-testid="stTextInput"] input,
+[data-testid="stTextArea"] textarea {{
+ background:#f7fbff !important; color:#102b45 !important;
+ -webkit-text-fill-color:#102b45 !important; caret-color:#102b45 !important;
+ border:1px solid #b9cfe2 !important; border-radius:10px !important;
+}}
+div[data-baseweb="input"] input::placeholder, div[data-baseweb="textarea"] textarea::placeholder,
+[data-testid="stTextInput"] input::placeholder, [data-testid="stTextArea"] textarea::placeholder {{
+ color:#71879b !important; -webkit-text-fill-color:#71879b !important; opacity:1 !important;
+}}
+[data-testid="stFileUploader"] section {{ background:#f7fbff !important; border:1px dashed #9db9d2 !important; border-radius:12px !important; }}
+[data-testid="stFileUploader"] section *, [data-testid="stFileUploader"] button {{ color:#183a58 !important; -webkit-text-fill-color:#183a58 !important; }}
+[data-testid="stSidebar"] div[data-baseweb="input"] input,
+[data-testid="stSidebar"] div[data-baseweb="textarea"] textarea,
+[data-testid="stSidebar"] [data-testid="stNumberInput"] input,
+[data-testid="stSidebar"] [data-testid="stTextInput"] input,
+[data-testid="stSidebar"] div[data-baseweb="select"] input {{ color:#102b45 !important; -webkit-text-fill-color:#102b45 !important; }}
+.stTextArea textarea {{ min-height:130px; }}
+.stButton>button,.stDownloadButton>button {{ border-radius:11px; font-weight:700; min-height:2.65rem; border:1px solid #148db8; color:white; background:linear-gradient(100deg,#087fa8,#1769b4); }}
+.stButton>button:hover,.stDownloadButton>button:hover {{ border-color:#0b638c; color:white; filter:brightness(1.08); }}
+[data-testid="stMetric"] {{ background:#fff; border:1px solid #dce6f0; border-radius:14px; padding:12px; }}
+[data-testid="stMetricLabel"] {{ color:#62788c !important; }} [data-testid="stMetricValue"] {{ color:#123b63 !important; }}
+.math-card {{ background:#fff; border:1px solid #dce6f0; border-radius:15px; padding:1rem 1.2rem; box-shadow:0 5px 16px rgba(15,44,73,.05); }}
+div[data-testid="stExpander"] {{ background:rgba(255,255,255,.86); border:1px solid #dce6f0; border-radius:12px; }}
+hr {{ border-color:rgba(91,130,160,.25); }}
+@media(max-width:800px) {{ .block-container {{ padding-left:1rem; padding-right:1rem; }} .hero {{ padding:1.4rem; min-height:165px; }} .section-banner {{ padding:1rem; }} }}
+</style>
+""", unsafe_allow_html=True)
+
+# ---------- Header / navigation ----------
+st.markdown(f"""
+<div class="hero">
+ <div class="eyebrow">{tr("hero_eyebrow")}</div>
+ <h1>HILLCRYPT <span style="color:#71d7e7;font-size:1.05rem">v4.2</span></h1>
+ <p>{tr('hero')}</p>
+ <p style="font-size:.9rem;margin-top:.65rem">{tr("hero_tagline")}</p>
+</div>""", unsafe_allow_html=True)
+
+# ---------- Navigation and global settings ----------
+page_keys = ["home","enc","dec","lab","learn","test","history","about"]
+nav_labels = [tr(k) for k in page_keys]
+if "page_key" not in st.session_state:
+    st.session_state.page_key = "home"
+
+with st.sidebar:
+    st.markdown("# 🔐 HILLCRYPT")
+    st.caption(tr("platform_subtitle"))
+    st.divider()
+    st.markdown("### "+tr("nav_heading"))
+    nav_index = page_keys.index(st.session_state.page_key)
+    selected_label = st.radio(
+        "Navigation", nav_labels, index=nav_index,
+        label_visibility="collapsed", key=f"navigation_{st.session_state.language}"
+    )
+    page_key = page_keys[nav_labels.index(selected_label)]
+    st.session_state.page_key = page_key
+    st.divider()
+    st.markdown(f"### ◈ {tr('encoding')}")
+    encoding_labels = ["ASCII Standard (0–127)","Windows-1252 (0–255)","UTF-8 / Unicode"]
+    if "global_encoding" not in st.session_state:
+        st.session_state.global_encoding = "utf8"
+    default_index = {"ascii":0,"windows1252":1,"utf8":2}[st.session_state.global_encoding]
+    chosen = st.radio("Encoding",encoding_labels,index=default_index,
+                      label_visibility="collapsed",key="encoding_choice")
+    mode = "ascii" if chosen.startswith("ASCII") else "windows1252" if chosen.startswith("Windows") else "utf8"
+    st.session_state.global_encoding = mode
+    st.caption(tr("encoding_info"))
+    st.divider()
+    st.markdown(f"### ▦ {tr('matrix')}")
+    if "matrix_order" not in st.session_state:
+        st.session_state.matrix_order = 4
+    minus_col, order_col, plus_col = st.columns([1,2,1])
+    with minus_col:
+        st.button("−", key="matrix_order_minus", help=tr("matrix_minus"),
+                  use_container_width=True,
+                  on_click=lambda: setattr(st.session_state, "matrix_order", max(1, st.session_state.matrix_order-1)))
+    with order_col:
+        st.markdown(f"<div style='text-align:center;padding:.55rem .2rem;font-size:1.08rem;font-weight:700;color:#eaf4ff'>{st.session_state.matrix_order} × {st.session_state.matrix_order}</div>",unsafe_allow_html=True)
+    with plus_col:
+        st.button("+", key="matrix_order_plus", help=tr("matrix_plus"),
+                  use_container_width=True,
+                  on_click=lambda: setattr(st.session_state, "matrix_order", min(16, st.session_state.matrix_order+1)))
+    n = int(st.session_state.matrix_order)
+    st.caption(tr("order") + f": {n} × {n} · 1–16")
+    key = st.text_input(tr("key"),value="THEKINGOFGEMINOR",type="default",key="global_key")
+    st.caption(tr("key_help"))
+    st.divider()
+    st.markdown(f"### ⓘ {tr('system')}")
+    st.markdown(f"""
+    <div class="small-muted">
+    {tr('system_encoding')}: <b>{MODES[mode]['label']}</b><br>
+    Modulus (m): <b>{MODES[mode]['modulus']}</b><br>
+    {tr('order')}: <b>{n} × {n}</b><br>
+    {tr('block')}: <b>{n} {tr('bytes')}</b>
+    </div>""",unsafe_allow_html=True)
+    st.divider()
+    st.caption("HILLCRYPT v4.2 · Aplikasi Web Responsif" if st.session_state.language=="id" else "HILLCRYPT v4.2 · Responsive Web App")
+
+m = MODES[mode]["modulus"]
+
+def banner(title, subtitle):
+    st.markdown(f'<div class="section-banner"><h1>{title}</h1><p>{subtitle}</p></div>',unsafe_allow_html=True)
+
+def show_equations():
+    st.subheader(tr("equations"))
+    left, right = st.columns(2, gap="large")
+    with left:
+        st.markdown(f'<div class="math-card"><h4>{tr("encrypt")}</h4></div>', unsafe_allow_html=True)
+        st.latex(r"\mathbf{C} = E_K(\mathbf{P}) \equiv K\mathbf{P} \pmod{m}")
+        st.caption("Enkripsi: setiap blok plaintext diubah menjadi blok ciphertext." if st.session_state.language=="id" else "Encryption transforms each plaintext block into a ciphertext block.")
+    with right:
+        st.markdown(f'<div class="math-card"><h4>{tr("decrypt")}</h4></div>', unsafe_allow_html=True)
+        st.latex(r"\mathbf{P} = D_K(\mathbf{C}) \equiv K^{-1}\mathbf{C} \pmod{m}")
+        st.caption("Dekripsi: ciphertext dikalikan dengan invers modular matriks kunci." if st.session_state.language=="id" else "Decryption multiplies ciphertext by the modular inverse of the key matrix.")
+    st.markdown("### "+("Uji pemulihan (round-trip)" if st.session_state.language=="id" else "Plaintext recovery (round-trip)"))
+    st.latex(r"D_K(E_K(\mathbf{P})) \equiv \mathbf{P} \pmod{m}")
+    st.info(tr("condition") + "  " + r"\(\gcd(\det(K),m)=1\).")
+    st.markdown("**"+tr("inverse_formula")+"**")
+    st.latex(r"K^{-1} \equiv (\det K)^{-1}\operatorname{adj}(K) \pmod{m}")
+    st.markdown("**"+tr("equation_symbols")+"**")
+    st.markdown("\n".join("- "+tr(k) for k in ["symbol_p","symbol_c","symbol_k","symbol_kinv","symbol_m","symbol_n","symbol_ek","symbol_dk","symbol_det"]))
+    st.markdown("**"+("Persamaan komponen" if st.session_state.language=="id" else "Component equations")+"**")
+    st.latex(r"c_i \equiv \sum_{j=1}^{n} k_{ij}p_j \pmod{m}")
+    st.latex(r"p_i \equiv \sum_{j=1}^{n} (K^{-1})_{ij}c_j \pmod{m}")
+    st.caption("Indeks i menunjukkan baris keluaran dan j menunjukkan komponen masukan." if st.session_state.language=="id" else "Index i denotes an output row and j denotes an input component.")
+
+def add_history(operation, mode_used, order_used, characters, byte_count):
+    """Store metadata only; never retain plaintext, ciphertext, or passphrases."""
+    if "activity_history" not in st.session_state: st.session_state.activity_history=[]
+    ts=datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+    st.session_state.activity_history.insert(0,{"id":datetime.now().timestamp(),"time":ts,"operation":operation,"encoding":MODES[mode_used]["label"],"order":f"{order_used} × {order_used}","characters":int(characters),"bytes":int(byte_count),"status":"Berhasil" if st.session_state.language=="id" else "Success"})
+    st.session_state.activity_history=st.session_state.activity_history[:100]
+
+def record_last_operation(direction,input_vector,output_vector,transform_matrix,order_used,modulus,mode_used):
+    st.session_state.last_operation_graph={"direction":direction,"input":[int(x) for x in input_vector],"output":[int(x) for x in output_vector],"matrix":[[int(x) for x in row] for row in transform_matrix],"n":int(order_used),"modulus":int(modulus),"mode":mode_used}
+
+def make_bipartite_dot(matrix,input_vector,output_vector,direction,modulus):
+    n_local=len(matrix); left="P" if direction=="encrypt" else "C"; right="C" if direction=="encrypt" else "P"
+    dot=["digraph HillOperation {","rankdir=LR; splines=true; nodesep=0.42; ranksep=1.0;",'graph [bgcolor="transparent", pad="0.3"];','node [shape=box, style="rounded,filled", color="#277fa5", fontcolor="#123653", fontname="Arial"];','edge [color="#1688ad", fontcolor="#123653", fontname="Arial", penwidth=1.5];','subgraph cluster_input { label="INPUT"; color="#9abbd0"; style="rounded";']
+    for j,v in enumerate(input_vector): dot.append(f'{left}{j+1} [label="{left}{j+1} = {int(v)}", fillcolor="#dff4ff"];')
+    dot.append("}"); dot.append('subgraph cluster_output { label="OUTPUT"; color="#9abbd0"; style="rounded";')
+    for i,v in enumerate(output_vector): dot.append(f'{right}{i+1} [label="{right}{i+1} = {int(v)}", fillcolor="#dff9ef"];')
+    dot.append("}")
+    for i in range(n_local):
+        for j in range(n_local):
+            w=int(matrix[i][j])%modulus
+            if w: dot.append(f'{left}{j+1} -> {right}{i+1} [label="{w}"];')
+    dot.append("}"); return "\n".join(dot)
+
+# ---------- Pages ----------
+if page_key == "home":
+    st.header(tr("welcome"))
+    st.write(tr("home_desc"))
+    cols=st.columns(4)
+    cards=[
+        ("3",tr("encoding"),"ASCII · Windows-1252 · UTF-8"),
+        ("n × n",tr("dashboard_matrix"),tr("matrix_card_desc")),
+        ("Dₖ(Eₖ(P)) ≡ P",tr("roundtrip_label"),"modulo m"),
+        ("∞","Teks panjang" if st.session_state.language=="id" else "Long text",tr("long_desc"))
+    ]
+    for col,(v,l,d) in zip(cols,cards):
+        col.markdown(f'<div class="kpi"><div class="label">{l}</div><div class="value">{v}</div><div class="desc">{d}</div></div>',unsafe_allow_html=True)
+    st.subheader(tr("start"))
+    c1,c2,c3=st.columns(3)
+    for col,ico,title,desc in [(c1,"🔒",tr("enc"),tr("encrypt_desc")),(c2,"🔓",tr("dec"),tr("decrypt_desc")),(c3,"▦",tr("lab"),tr("lab_desc"))]:
+        col.markdown(f'<div class="panel"><h3>{ico} {title}</h3><p>{desc}</p></div>',unsafe_allow_html=True)
+    st.info(tr("encoding_info"))
+    st.caption(tr("long"))
+    show_equations()
+
+elif page_key == "enc":
+    banner("🔒 "+tr("encryption"),tr("encrypt_desc"))
+    left,right=st.columns([1,1],gap="large")
+    with left:
+        st.markdown(f"#### {tr('encoding')}")
+        st.info(f"{MODES[mode]['label']} · modulo {m}")
+        st.markdown(f"#### {tr('matrix')}")
+        st.write(f"{tr('order')}: **{n} × {n}**")
+        passphrase=key
+        try:
+            matrix=derive_key_matrix(passphrase,int(n),m)
+            det=matrix_determinant(matrix)
+            st.success(f"{tr('matrix_ok')} {m}. det(K) = {det}; gcd = 1.")
+            with st.expander(tr("matrix_show")):
+                inverse = matrix_inverse_mod(matrix, m)
+                mat_left, mat_right = st.columns(2, gap="medium")
+                with mat_left:
+                    st.markdown("**"+("Matriks kunci K" if st.session_state.language=="id" else "Key matrix K")+"**")
+                    st.dataframe(pd.DataFrame(matrix),hide_index=True,use_container_width=True)
+                with mat_right:
+                    st.markdown("**"+("Invers modular K⁻¹" if st.session_state.language=="id" else "Modular inverse K⁻¹")+"**")
+                    st.dataframe(pd.DataFrame(inverse),hide_index=True,use_container_width=True)
+                st.caption(f"det(K) = {det} · det(K) mod {m} = {det % m} · gcd(det(K), {m}) = 1")
+        except Exception as exc:
+            st.error(str(exc))
+            matrix=None
+        uploaded=st.file_uploader(tr("upload_plain"),type=["txt"],key="enc_upload")
+    with right:
+        text=st.text_area(tr("plain"),height=245,placeholder="Write any message, paragraph, or long text here…",key="plain_input")
+        if uploaded is not None:
+            try:
+                text=decode_plaintext(uploaded.getvalue(),mode)
+                st.success(f"{tr('loaded_file')}: {uploaded.name}")
+            except Exception as exc:
+                st.error(str(exc)); text=""
+        try:
+            byte_count=len(encode_plaintext(text,mode)) if text else 0
+        except Exception as exc:
+            byte_count=0
+            st.error(str(exc))
+        if text:
+            char_label = "karakter" if st.session_state.language=="id" else "characters"
+            byte_label = "byte" if st.session_state.language=="id" else "bytes"
+            st.caption(f"{len(text):,} {char_label} · {byte_count:,} {byte_label}")
+        else:
+            st.caption(tr("empty_text"))
+    if st.button("🔐 "+tr("encrypt_now"),type="primary",use_container_width=True,disabled=(not bool(text) or matrix is None)):
+        try:
+            package,info=create_package(text,key,int(n),mode)
+            raw_json=json.dumps(package,ensure_ascii=False,indent=2)
+            raw_input=encode_plaintext(text,mode)
+            padded=raw_input+(b"\x00"*((-len(raw_input))%int(n)))
+            cipher_bytes=base64.b64decode(package["ciphertext_b64"])
+            key_matrix=derive_key_matrix(key,int(n),m)
+            record_last_operation("encrypt",padded[:int(n)],cipher_bytes[:int(n)],key_matrix,int(n),m,mode)
+            add_history("Enkripsi" if st.session_state.language=="id" else "Encryption",mode,int(n),len(text),len(raw_input))
+            st.success(tr("success_enc"))
+            a,b,c=st.columns(3)
+            a.metric("Characters",f"{len(text):,}")
+            b.metric(tr("metric_cipherbytes"),f"{info['ciphertext_bytes']:,}")
+            c.metric(tr("metric_matrixorder"),f"{n} × {n}")
+            st.markdown("#### "+tr("cipher_only"))
+            st.caption(tr("cipher_copy_help"))
+            st.code(package["ciphertext_b64"],language="text")
+            st.markdown("#### "+tr("package_mode"))
+            with st.expander(tr("package_expander")):
+                st.code(raw_json,language="json")
+            st.download_button("⬇ "+tr("download_pkg"),raw_json.encode("utf-8"),"HILLCRYPT_ciphertext.hce","application/json",use_container_width=True)
+            st.download_button("⬇ "+tr("download_raw"),package["ciphertext_b64"].encode("ascii"),"HILLCRYPT_ciphertext_base64.txt","text/plain",use_container_width=True)
+            st.info(tr("copy_hint"))
+        except Exception as exc:
+            st.error(str(exc))
+
+elif page_key == "dec":
+    banner("🔓 "+tr("decryption"),tr("decrypt_desc"))
+    st.markdown(f"#### {tr('input_method')}")
+    input_type=st.radio(tr("input_method"),[tr("package_mode"),tr("raw_b64")],horizontal=True)
+    if input_type==tr("package_mode"):
+        c1,c2=st.columns([1,1],gap="large")
+        with c1:
+            uploaded=st.file_uploader(tr("upload_cipher"),type=["hce","json"],key="dec_upload")
+            pasted=st.text_area(tr("cipher"),height=230,placeholder=tr("paste"),key="package_input")
+        with c2:
+            st.markdown("#### "+tr("result"))
+            st.caption(tr("copy_hint"))
+            st.caption("Disarankan: gunakan file .hce hasil unduhan agar metadata tidak perlu diisi manual." if st.session_state.language=="id" else "Recommended: use the downloaded .hce file so metadata is filled automatically.")
+            if uploaded is not None:
+                try:
+                    package_text=uploaded.getvalue().decode("utf-8-sig")
+                    st.success(f"{tr('loaded_file')}: {uploaded.name}")
+                except UnicodeDecodeError:
+                    package_text=""
+                    st.error("File paket harus berupa teks JSON UTF-8 yang valid." if st.session_state.language=="id" else "The package file must contain valid UTF-8 JSON text.")
+            else:
+                package_text=pasted
+            try:
+                preview_package = json.loads(package_text) if package_text.strip() else None
+            except (json.JSONDecodeError, TypeError):
+                preview_package = None
+            is_complete_package = isinstance(preview_package, dict) and bool(preview_package.get("format"))
+            if is_complete_package:
+                raw_length = 0
+                st.caption(tr("auto_length"))
+            else:
+                st.caption(tr("auto_length"))
+                raw_length = st.number_input(
+                    tr("manual_raw_length"),
+                    min_value=0, value=0, step=1, key="dec_raw_length"
+                )
+            if st.button("🔓 "+tr("decrypt_now"),type="primary",use_container_width=True,key="dec_package",disabled=not bool(package_text.strip())):
+                try:
+                    # Accept both a complete HILLCRYPT JSON package and the
+                    # Base64-only ciphertext displayed by earlier app builds.
+                    try:
+                        parsed = json.loads(package_text)
+                    except (json.JSONDecodeError, TypeError):
+                        parsed = None
+                    if isinstance(parsed, dict) and parsed.get("format"):
+                        plaintext,info=decrypt_package(parsed,key)
+                        pmode=parsed["mode"]; pmod=MODES[pmode]["modulus"]; pn=int(parsed["matrix_order"])
+                        cdata=base64.b64decode(parsed["ciphertext_b64"],validate=True); pdata=encode_plaintext(plaintext,pmode)
+                        pdata_original_length=len(pdata)
+                        pdata=pdata+(b"\x00"*max(0,pn-len(pdata)))
+                        invmat=matrix_inverse_mod(derive_key_matrix(key,pn,pmod),pmod)
+                        record_last_operation("decrypt",cdata[:pn],pdata[:pn],invmat,pn,pmod,pmode)
+                        add_history("Dekripsi" if st.session_state.language=="id" else "Decryption",pmode,pn,len(plaintext),pdata_original_length)
+                    else:
+                        compact_b64 = "".join(package_text.split())
+                        ciphertext = base64.b64decode(compact_b64, validate=True)
+                        if raw_length <= 0:
+                            raise ValueError(
+                                ("Input terdeteksi sebagai Base64 mentah. Isi 'Panjang byte asli' sesuai jumlah byte plaintext sebelum padding."
+                                 if st.session_state.language=="id" else
+                                 "Raw Base64 input detected. Enter the original plaintext byte length before padding.")
+                            )
+                        raw = decrypt_bytes(ciphertext,key,int(n),m,int(raw_length))
+                        plaintext = decode_plaintext(raw,mode)
+                        info = {"encoding":MODES[mode]["encoding"],"modulus":m,
+                                "n":int(n),"original_bytes":len(raw)}
+                        raw_graph=raw+(b"\x00"*max(0,int(n)-len(raw)))
+                        invmat=matrix_inverse_mod(derive_key_matrix(key,int(n),m),m)
+                        record_last_operation("decrypt",ciphertext[:int(n)],raw_graph[:int(n)],invmat,int(n),m,mode)
+                        add_history("Dekripsi" if st.session_state.language=="id" else "Decryption",mode,int(n),len(plaintext),len(raw))
+                    st.success(tr("success_dec"))
+                    st.text_area(tr("result"),plaintext,height=230,key="restored_package")
+                    st.download_button("⬇ "+tr("download_text"),plaintext.encode("utf-8"),"HILLCRYPT_plaintext.txt","text/plain",use_container_width=True)
+                    if st.session_state.language=="id":
+                        st.caption(f"Encoding: {info['encoding']} · Modulo: {info['modulus']} · Matriks: {info['n']} × {info['n']} · Byte asli: {info['original_bytes']:,}")
+                    else:
+                        st.caption(f"Encoding: {info['encoding']} · Modulus: {info['modulus']} · Matrix: {info['n']} × {info['n']} · Original bytes: {info['original_bytes']:,}")
+                except Exception as exc:
+                    st.error(str(exc))
+        st.info(tr("copy_hint"))
+    else:
+        st.info(tr("raw_info"))
+        raw_text=st.text_area(tr("raw_b64"),height=160,placeholder=tr("raw_placeholder"))
+        original_len=st.number_input(tr("original_len"),min_value=0,value=0,step=1)
+        if st.button("🔓 "+tr("decrypt_now"),type="primary",use_container_width=True,disabled=not raw_text.strip(),key="dec_raw"):
+            try:
+                ciphertext=base64.b64decode("".join(raw_text.split()),validate=True)
+                raw=decrypt_bytes(ciphertext,key,int(n),m,int(original_len))
+                plaintext=decode_plaintext(raw,mode)
+                raw_graph=raw+(b"\x00"*max(0,int(n)-len(raw)))
+                invmat=matrix_inverse_mod(derive_key_matrix(key,int(n),m),m)
+                record_last_operation("decrypt",ciphertext[:int(n)],raw_graph[:int(n)],invmat,int(n),m,mode)
+                add_history("Dekripsi" if st.session_state.language=="id" else "Decryption",mode,int(n),len(plaintext),len(raw))
+                st.success(tr("success_dec"))
+                st.text_area(tr("result"),plaintext,height=220,key="restored_raw")
+                st.download_button("⬇ "+tr("download_text"),plaintext.encode("utf-8"),"HILLCRYPT_plaintext.txt","text/plain",use_container_width=True)
+            except Exception as exc:
+                st.error(str(exc))
+
+elif page_key == "lab":
+    banner("▦ "+tr("lab"),tr("lab_desc"))
+    matrix = None
+    try:
+        matrix=derive_key_matrix(key,int(n),m)
+        det=matrix_determinant(matrix)
+        inv=matrix_inverse_mod(matrix,m)
+        st.success(f"{tr('matrix_ok')} {m}. det(K) = {det}; gcd(det(K), {m}) = 1.")
+        a,b=st.columns(2)
+        with a:
+            st.markdown("#### "+("Matriks kunci K" if st.session_state.language=="id" else "Key matrix K"))
+            st.dataframe(pd.DataFrame(matrix),hide_index=True,use_container_width=True)
+        with b:
+            st.markdown("#### "+("Invers K⁻¹ (mod m)" if st.session_state.language=="id" else "Inverse K⁻¹ (mod m)"))
+            st.dataframe(pd.DataFrame(inv),hide_index=True,use_container_width=True)
+        identity=[[sum(matrix[i][k]*inv[k][j] for k in range(int(n)))%m for j in range(int(n))] for i in range(int(n))]
+        st.markdown("#### "+("K × K⁻¹ (mod m)" if st.session_state.language=="id" else "K × K⁻¹ (mod m)"))
+        st.dataframe(pd.DataFrame(identity),hide_index=True,use_container_width=True)
+        st.latex(r"K K^{-1}\equiv I_n\pmod{m}")
+    except Exception as exc:
+        st.error(str(exc))
+    st.divider()
+    st.subheader(tr("graph_title"))
+    st.caption(tr("graph_desc"))
+    if matrix is None:
+        st.warning("Periksa kata kunci sebelum menggunakan alat matriks." if st.session_state.language=="id" else "Check the passphrase before using matrix tools.")
+    elif int(n)<=12:
+        dot=["digraph KeyMatrix {","rankdir=LR;",'graph [bgcolor="transparent", pad="0.25"];','node [shape=circle, style=filled, fillcolor="#e7f4ff", color="#167da5", fontcolor="#123653"];','edge [color="#1596bd", fontcolor="#123653"];']
+        for i in range(int(n)): dot.append(f'v{i+1} [label="v{i+1}"];')
+        for i in range(int(n)):
+            for j in range(int(n)):
+                w=int(matrix[i][j])%m
+                if w: dot.append(f'v{i+1} -> v{j+1} [label="{w}"];')
+        dot.append("}"); st.graphviz_chart("\n".join(dot),use_container_width=True)
+    else: st.info(tr("graph_limit"))
+    st.divider(); st.subheader(tr("graph_operation_title")); st.caption(tr("graph_operation_desc"))
+    last=st.session_state.get("last_operation_graph")
+    if last:
+        enc=last["direction"]=="encrypt"
+        st.markdown("**"+(tr("graph_encrypt_title") if enc else tr("graph_decrypt_title"))+"**")
+        st.caption(tr("graph_encrypt_caption") if enc else tr("graph_decrypt_caption"))
+        st.caption(tr("graph_first_block"))
+        st.markdown("**"+tr("graph_input")+"**: `"+", ".join(map(str,last["input"]))+"`")
+        st.markdown("**"+tr("graph_output")+"**: `"+", ".join(map(str,last["output"]))+"`")
+        st.graphviz_chart(make_bipartite_dot(last["matrix"],last["input"],last["output"],last["direction"],last["modulus"]),use_container_width=True)
+        if enc: st.latex(r"c_i \equiv \sum_{j=1}^{n} k_{ij}p_j \pmod{m}")
+        else: st.latex(r"p_i \equiv \sum_{j=1}^{n} (K^{-1})_{ij}c_j \pmod{m}")
+    else: st.info(tr("graph_no_operation"))
+
+    st.divider()
+    st.subheader(tr("manual_calc"))
+    st.caption(tr("manual_calc_desc"))
+    calc_n = st.selectbox(tr("order_label"), [2,3,4], index=0, key="manual_calc_order")
+    ca, cb = st.columns(2)
+    default_a = pd.DataFrame([[1 if i==j else 0 for j in range(calc_n)] for i in range(calc_n)],
+                             columns=[f"C{j+1}" for j in range(calc_n)])
+    default_b = pd.DataFrame([[1 if i==j else 0 for j in range(calc_n)] for i in range(calc_n)],
+                             columns=[f"C{j+1}" for j in range(calc_n)])
+    with ca:
+        st.markdown("**"+tr("matrix_a")+"**")
+        A_df = st.data_editor(default_a,key=f"manual_A_{calc_n}",use_container_width=True,hide_index=True)
+    with cb:
+        st.markdown("**"+tr("matrix_b")+"**")
+        B_df = st.data_editor(default_b,key=f"manual_B_{calc_n}",use_container_width=True,hide_index=True)
+    if st.button(tr("calculate"),key="manual_matrix_calculate"):
+        try:
+            A = [[int(A_df.iloc[i,j]) for j in range(calc_n)] for i in range(calc_n)]
+            B = [[int(B_df.iloc[i,j]) for j in range(calc_n)] for i in range(calc_n)]
+            product = [[sum(A[i][k]*B[k][j] for k in range(calc_n)) % m
+                        for j in range(calc_n)] for i in range(calc_n)]
+            st.markdown("#### "+tr("manual_result"))
+            st.dataframe(pd.DataFrame(product),hide_index=True,use_container_width=True)
+            st.latex(r"(AB)_{ij} \equiv \sum_{k=1}^{n} a_{ik}b_{kj} \pmod{m}")
+        except Exception as exc:
+            st.error(str(exc))
+
+    st.markdown("#### "+tr("vector_calc"))
+    vector_text = st.text_input(tr("vector_input"),value=",".join(["1"]*int(n)),key="manual_vector_input")
+    st.caption(tr("vector_help"))
+    if st.button(tr("calculate")+" · K × P",key="manual_vector_calculate",disabled=matrix is None):
+        try:
+            values = [int(x.strip()) for x in vector_text.split(",") if x.strip()!=""]
+            if len(values) != int(n):
+                raise ValueError(f"{tr('manual_expected')} {n} {'bilangan bulat' if st.session_state.language=='id' else 'integers'}.")
+            values = [x % m for x in values]
+            output = [sum(int(matrix[i][j])*values[j] for j in range(int(n))) % m for i in range(int(n))]
+            st.markdown("#### "+tr("calculation_steps"))
+            for i in range(int(n)):
+                terms = " + ".join(f"({int(matrix[i][j])}×{values[j]})" for j in range(int(n)))
+                st.write(f"C{i+1} = ({terms}) mod {m} = {output[i]}")
+            st.markdown("#### "+tr("vector_result"))
+            st.code(str(output))
+        except Exception as exc:
+            st.error(str(exc))
+    show_equations()
+
+elif page_key == "learn":
+    banner("📘 "+tr("learn"),tr("learn_intro"))
+    content_id=[
+      ("1. Pengertian kriptografi","Kriptografi mempelajari teknik transformasi informasi. Plaintext adalah pesan asli, ciphertext adalah pesan tersandi, enkripsi mengubah plaintext menjadi ciphertext, sedangkan dekripsi memulihkannya."),
+      ("2. Hill Cipher","Hill Cipher adalah cipher klasik yang menggunakan matriks persegi dan aritmetika modulo. Pesan diubah menjadi bilangan, dibagi menjadi blok berukuran n, kemudian ditransformasikan dengan matriks kunci."),
+      ("3. Representasi vektor","Setiap blok plaintext direpresentasikan sebagai vektor kolom p berukuran n × 1. Matriks kunci K berukuran n × n menghasilkan vektor ciphertext c."),
+      ("4. Enkripsi","Persamaan enkripsi adalah c ≡ Kp (mod m). Perkalian matriks dilakukan terlebih dahulu, kemudian setiap entri direduksi modulo m."),
+      ("5. Dekripsi","Persamaan dekripsi adalah p ≡ K⁻¹c (mod m). K⁻¹ merupakan invers matriks K pada aritmetika modulo m."),
+      ("6. Syarat invers modular","Matriks K memiliki invers modulo m jika dan hanya jika gcd(det(K),m)=1. Karena modulus 128 atau 256 bukan bilangan prima, determinan harus relatif prima terhadap modulus."),
+      ("7. ASCII Standard","ASCII standar menggunakan 7 bit dan memiliki 128 kode (0–127), termasuk huruf Latin dasar, angka, tanda baca, spasi, dan karakter kontrol."),
+      ("8. Windows-1252","Windows-1252 merupakan encoding satu byte. Rentang 0–127 sama dengan ASCII, sedangkan 128–255 memuat karakter tambahan. Lima byte tidak terdefinisi sebagai karakter CP1252: 129, 141, 143, 144, dan 157."),
+      ("9. UTF-8 dan Unicode","UTF-8 mengodekan karakter Unicode sebagai satu hingga empat byte. Hill Cipher memproses urutan byte tersebut pada modulus 256; satu karakter Unicode dapat menempati beberapa byte."),
+      ("10. Padding dan panjang pesan","Jika jumlah byte tidak habis dibagi n, byte nol ditambahkan di akhir blok. Paket menyimpan panjang byte asli agar byte padding dapat dibuang setelah dekripsi."),
+      ("11. Keterbatasan keamanan","Hill Cipher bersifat linear, tidak menyediakan autentikasi, dan rentan terhadap serangan known-plaintext. Algoritma ini sesuai untuk pembelajaran, bukan untuk melindungi informasi rahasia."),
+      ("12. Kustomisasi kata kunci","Kata kunci digunakan untuk membangkitkan matriks kunci secara deterministik. Pengguna boleh mengganti kata kunci. Pengirim dan penerima harus menggunakan kata kunci yang sama, ordo matriks yang sama, dan mode encoding yang sama. Paket HCE menyimpan sidik jari kunci untuk mendeteksi ketidakcocokan kunci, bukan untuk mengautentikasi pesan."),
+      ("13. Hubungan matriks dengan graf","Matriks persegi dapat dipandang sebagai matriks ketetanggaan berbobot suatu graf berarah. Indeks baris dan kolom menjadi simpul, sedangkan entri tak nol Kᵢⱼ menjadi sisi berarah dari simpul i ke simpul j dengan bobot Kᵢⱼ. Visualisasi ini membantu menghubungkan aljabar linear, teori graf, dan transformasi Hill Cipher."),
+      ("14. Proses enkripsi per blok","Byte plaintext dibagi menjadi blok berukuran n. Setiap blok disusun sebagai vektor kolom p. Matriks K dikalikan dengan p, lalu hasilnya direduksi modulo m. Jika blok terakhir tidak penuh, padding nol ditambahkan agar panjang blok menjadi n."),
+      ("15. Mengapa panjang asli disimpan","Padding membuat ciphertext memiliki panjang kelipatan n. Dari ciphertext Base64 mentah saja, panjang byte plaintext sebelum padding tidak dapat ditentukan secara unik. Karena itu paket HCE menyimpan panjang byte asli agar dekripsi dapat membuang padding secara tepat.")
+    ]
+    content_en=[
+      ("1. Cryptography","Cryptography studies transformations used to protect information. Plaintext is the original message, ciphertext is the transformed message, encryption converts plaintext to ciphertext, and decryption restores it."),
+      ("2. Hill Cipher","The Hill Cipher is a classical cipher using square matrices and modular arithmetic. A message is converted to numbers, divided into blocks of size n, and transformed using a key matrix."),
+      ("3. Vector representation","Each plaintext block is represented as an n × 1 column vector p. The n × n key matrix K produces a ciphertext vector c."),
+      ("4. Encryption","The encryption equation is c ≡ Kp (mod m). Perform matrix multiplication first, then reduce each entry modulo m."),
+      ("5. Decryption","The decryption equation is p ≡ K⁻¹c (mod m). K⁻¹ is the inverse of K in modular arithmetic."),
+      ("6. Modular inverse condition","K has an inverse modulo m if and only if gcd(det(K),m)=1. Since 128 and 256 are composite, the determinant must be coprime to the modulus."),
+      ("7. ASCII Standard","Standard ASCII uses 7 bits and has 128 codes (0–127), including basic Latin letters, digits, punctuation, spaces, and control characters."),
+      ("8. Windows-1252","Windows-1252 is a single-byte encoding. Codes 0–127 match ASCII, while 128–255 contain additional characters. Five byte positions are undefined in CP1252: 129, 141, 143, 144, and 157."),
+      ("9. UTF-8 and Unicode","UTF-8 encodes Unicode characters into one to four bytes. The Hill Cipher processes these bytes modulo 256; one Unicode character may occupy multiple bytes."),
+      ("10. Padding and message length","If the byte count is not divisible by n, zero bytes are appended. The package stores the original byte length so padding can be removed after decryption."),
+      ("11. Security limitations","The Hill Cipher is linear, provides no authentication, and is vulnerable to known-plaintext attacks. It is suitable for education, not for protecting confidential information."),
+      ("12. Customizable passphrase","The passphrase deterministically derives the key matrix. Users may change it. Sender and recipient must use the same passphrase, matrix order, and encoding mode. The HCE package stores a key fingerprint to detect a mismatch; it does not authenticate the message."),
+      ("13. Matrix and graph connection","A square matrix can be interpreted as the weighted adjacency matrix of a directed graph. Row and column indices become vertices, while nonzero entries Kᵢⱼ become directed edges from vertex i to vertex j with weight Kᵢⱼ. This visualization connects linear algebra, graph theory, and the Hill transformation."),
+      ("14. Block encryption process","Plaintext bytes are divided into blocks of length n. Each block becomes a column vector p. The key matrix K multiplies p, and each result is reduced modulo m. If the last block is incomplete, zero padding is added to reach n bytes."),
+      ("15. Why the original length is stored","Padding makes ciphertext length a multiple of n. The original plaintext byte length cannot be uniquely determined from raw Base64 ciphertext alone. Therefore, an HCE package stores the original byte length so decryption can remove padding exactly.")
+    ]
+    for title,body in (content_id if st.session_state.language=="id" else content_en):
+        with st.expander(title):
+            st.write(body)
+            if title.startswith(("3.","4.","5.")):
+                if title.startswith("4."): st.latex(r"\mathbf{c}\equiv K\mathbf{p}\pmod{m}")
+                elif title.startswith("5."): st.latex(r"\mathbf{p}\equiv K^{-1}\mathbf{c}\pmod{m}")
+    show_equations()
+    st.warning(tr("warning"))
+    st.divider()
+    st.subheader(tr("ascii_title"))
+    st.caption(tr("ascii_desc"))
+    range_choice = st.selectbox(tr("ascii_range"),
+        [tr("ascii_standard"),tr("ascii_extended"),tr("ascii_all")],key="ascii_table_range")
+    search_ascii = st.text_input(tr("ascii_search"),key="ascii_table_search")
+    if range_choice == tr("ascii_standard"):
+        codes = range(0,128)
+    elif range_choice == tr("ascii_extended"):
+        codes = range(128,256)
+    else:
+        codes = range(0,256)
+    control_names = {
+        0:"NUL",1:"SOH",2:"STX",3:"ETX",4:"EOT",5:"ENQ",6:"ACK",7:"BEL",
+        8:"BS",9:"TAB",10:"LF",11:"VT",12:"FF",13:"CR",14:"SO",15:"SI",
+        16:"DLE",17:"DC1",18:"DC2",19:"DC3",20:"DC4",21:"NAK",22:"SYN",
+        23:"ETB",24:"CAN",25:"EM",26:"SUB",27:"ESC",28:"FS",29:"GS",
+        30:"RS",31:"US",127:"DEL"
+    }
+    ascii_rows=[]
+    for code in codes:
+        if code < 128:
+            char = control_names.get(code, chr(code) if code >= 32 else tr("ascii_control"))
+            description = tr("ascii_control") if code < 32 or code == 127 else tr("ascii_printable")
+        else:
+            try:
+                char = bytes([code]).decode("cp1252")
+                if not char.isprintable(): char = "—"
+            except UnicodeDecodeError:
+                char = tr("ascii_undefined")
+            description = tr("ascii_cp1252")
+        ascii_rows.append({tr("ascii_decimal"):code,tr("ascii_hex"):f"0x{code:02X}",tr("ascii_binary"):f"{code:08b}",tr("ascii_character"):char,tr("ascii_type"):description})
+    ascii_df=pd.DataFrame(ascii_rows)
+    if search_ascii:
+        q=search_ascii.casefold()
+        ascii_df=ascii_df[ascii_df.apply(lambda row:any(q in str(v).casefold() for v in row),axis=1)]
+    st.dataframe(ascii_df,use_container_width=True,hide_index=True,height=420)
+
+elif page_key == "test":
+    banner("🧪 "+tr("test"),tr("test_desc"))
+    test_text=st.text_area(tr("plain"),"HILLCRYPT test 123 — 🔐\nUnicode, symbols, and line breaks.",height=150)
+    if st.button("▶ "+tr("roundtrip"),type="primary",use_container_width=True):
+        try:
+            package,info=create_package(test_text,key,int(n),mode)
+            restored,_=decrypt_package(package,key)
+            if restored==test_text: st.success(tr("pass"))
+            else: st.error("GAGAL — teks hasil pemulihan berbeda." if st.session_state.language=="id" else "FAIL — restored text differs.")
+            a,b,c=st.columns(3)
+            a.metric("Karakter" if st.session_state.language=="id" else "Characters",f"{len(test_text):,}")
+            b.metric("Byte asli" if st.session_state.language=="id" else "Original bytes",f"{info['original_bytes']:,}")
+            c.metric("Byte ciphertext" if st.session_state.language=="id" else "Ciphertext bytes",f"{info['ciphertext_bytes']:,}")
+        except Exception as exc:
+            st.error(str(exc))
+
+elif page_key == "history":
+    banner("◷ "+tr("history"),tr("history_desc")); st.info(tr("history_privacy"))
+    records=st.session_state.get("activity_history",[])
+    if records:
+        display_rows=[{tr("history_time"):x["time"],tr("history_operation"):x["operation"],tr("history_encoding"):x["encoding"],tr("history_order"):x["order"],tr("history_chars"):x["characters"],tr("history_bytes"):x["bytes"],tr("history_status"):x["status"]} for x in records]
+        st.dataframe(pd.DataFrame(display_rows),use_container_width=True,hide_index=True)
+        ids=[x["id"] for x in records]
+        selected=st.selectbox(tr("history_clear_one"),ids,format_func=lambda v:next((f"{x['time']} · {x['operation']} · {x['encoding']}" for x in records if x["id"]==v),str(v)),key="history_delete_select")
+        ca,cb=st.columns(2)
+        with ca:
+            if st.button("🗑 "+tr("history_clear_one"),use_container_width=True):
+                st.session_state.activity_history=[x for x in records if x["id"]!=selected]; st.rerun()
+        with cb:
+            if st.button("🗑 "+tr("history_clear_all"),use_container_width=True):
+                st.session_state.activity_history=[]; st.session_state.pop("last_operation_graph",None); st.rerun()
+    else: st.info(tr("history_empty"))
+    st.divider(); st.subheader(tr("memory_clear")); st.caption(tr("memory_clear_help"))
+    if st.button("🧹 "+tr("memory_clear"),type="primary",use_container_width=True):
+        st.session_state.activity_history=[]; st.session_state.pop("last_operation_graph",None)
+        for k in ["last_encrypt_package","last_plaintext","last_ciphertext","plain_input","package_input","restored_package","restored_raw"]: st.session_state.pop(k,None)
+        st.cache_data.clear(); st.cache_resource.clear(); st.success(tr("memory_done")); st.rerun()
+
+elif page_key == "about":
+    banner("ℹ️ "+tr("about"),tr("about_desc"))
+    st.markdown(f"""
+    <div class="panel">
+    <h3>HILLCRYPT v4.2</h3>
+    <p>{tr('about_desc')}</p>
+    <h4>{tr('about_objectives')}</h4>
+    <ol>
+    <li>{tr('about_obj_1')}</li>
+    <li>{tr('about_obj_2')}</li>
+    <li>{tr('about_obj_3')}</li>
+    <li>{tr('about_obj_4')}</li>
+    <li>{tr('about_obj_5')}</li>
+    </ol></div>""",unsafe_allow_html=True)
+    st.warning(tr("warning"))
+    st.info(tr("local_note"))
+    st.divider()
+    st.markdown("### "+("Hak Cipta dan Kepemilikan" if st.session_state.language=="id" else "Copyright and Ownership"))
+    st.markdown(f"**{tr('copyright')}**")
+    st.caption(tr("copyright_note"))
+    st.markdown("**"+tr("cross_device")+"**")
+    st.write(tr("cross_device_desc"))
+    st.caption(tr("copyright"))
+
+
+st.markdown("<div style='text-align:center;color:#71879b;font-size:.78rem;padding:1.2rem 0;border-top:1px solid #dce6f0'>© 2026 Mamay Nurholifah · HILLCRYPT</div>", unsafe_allow_html=True)

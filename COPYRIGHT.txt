@@ -1,0 +1,4 @@
+© 2026 Mamay Nurholifah. HILLCRYPT – Matrix Cryptography Learning Platform.
+All rights reserved for the original HILLCRYPT application code, interface arrangement, and original educational materials, subject to applicable law.
+Third-party libraries, frameworks, fonts, and assets remain subject to their respective licenses and terms.
+Hill Cipher implementation is provided for educational use only and is not suitable for protecting confidential information.
