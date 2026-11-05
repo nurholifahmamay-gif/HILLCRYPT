@@ -3,6 +3,8 @@ import base64
 import hashlib
 import json
 import math
+import hmac
+import secrets
 from sympy import Matrix
 
 MODES = {
@@ -25,7 +27,8 @@ MODES = {
         "encoding": "utf-8",
     },
 }
-PACKAGE_FORMAT = "HILLCRYPT-PACKAGE-V3"
+PACKAGE_FORMAT = "HILLCRYPT-PACKAGE-V4"
+LEGACY_PACKAGE_FORMAT = "HILLCRYPT-PACKAGE-V3"
 MIN_ORDER = 1
 MAX_ORDER = 16
 
@@ -137,19 +140,37 @@ def decode_plaintext(data, mode):
             "Periksa kata kunci, paket, dan mode encoding."
         ) from exc
 
-def create_package(text, key, n, mode):
+def _canonical_package_bytes(package):
+    """Stable serialization used for package authentication."""
+    payload = {k: v for k, v in package.items() if k != "auth_tag"}
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+def _derive_package_auth_key(key, salt):
+    """Derive a package-specific authentication key from the passphrase.
+
+    scrypt makes offline guessing more expensive, but this educational
+    construction is not a replacement for a modern authenticated cipher.
+    """
+    return hashlib.scrypt(
+        key.encode("utf-8"), salt=salt, n=2**14, r=8, p=1, dklen=32
+    )
+
+def create_package(text, key, n, mode, key_source="MANUAL"):
     if not isinstance(text, str) or text == "":
         raise ValueError("Plaintext tidak boleh kosong.")
-    if not isinstance(n, int) or not MIN_ORDER <= n <= MAX_ORDER:
+    if not isinstance(n, int) or isinstance(n, bool) or not MIN_ORDER <= n <= MAX_ORDER:
         raise ValueError(f"Ordo matriks harus {MIN_ORDER} sampai {MAX_ORDER}.")
     if mode not in MODES:
         raise ValueError("Mode encoding tidak dikenal.")
+    if not isinstance(key_source, str) or not key_source.strip():
+        raise ValueError("Sumber kata kunci tidak valid.")
     raw = encode_plaintext(text, mode)
     modulus = MODES[mode]["modulus"]
     ciphertext, info = encrypt_bytes(raw, key, n, modulus)
+    salt = secrets.token_bytes(16)
     package = {
         "format": PACKAGE_FORMAT,
-        "version": 3,
+        "version": 4,
         "algorithm": "Educational Hill Cipher",
         "mode": mode,
         "encoding": MODES[mode]["encoding"],
@@ -159,7 +180,12 @@ def create_package(text, key, n, mode):
         "original_byte_length": len(raw),
         "ciphertext_b64": base64.b64encode(ciphertext).decode("ascii"),
         "key_fingerprint": key_fingerprint(key),
+        "key_source": key_source.upper(),
+        "auth": "HMAC-SHA256-SCRYPT",
+        "auth_salt_b64": base64.b64encode(salt).decode("ascii"),
     }
+    auth_key = _derive_package_auth_key(key, salt)
+    package["auth_tag"] = hmac.new(auth_key, _canonical_package_bytes(package), hashlib.sha256).hexdigest()
     return package, info
 
 def decrypt_package(package, key):
@@ -168,8 +194,11 @@ def decrypt_package(package, key):
             package = json.loads(package)
         except Exception as exc:
             raise ValueError("Isi paket ciphertext bukan JSON yang valid.") from exc
-    if not isinstance(package, dict) or package.get("format") != PACKAGE_FORMAT:
-        raise ValueError("Format paket tidak dikenali. Gunakan paket HILLCRYPT v3 (.hce/.json).")
+    if not isinstance(package, dict):
+        raise ValueError("Format paket ciphertext tidak dikenali.")
+    package_format = package.get("format")
+    if package_format not in (PACKAGE_FORMAT, LEGACY_PACKAGE_FORMAT):
+        raise ValueError("Format paket tidak dikenali. Gunakan paket HILLCRYPT (.hce/.json).")
     mode = package.get("mode")
     if mode not in MODES:
         raise ValueError("Mode encoding pada paket tidak valid.")
@@ -181,8 +210,22 @@ def decrypt_package(package, key):
             or package.get("block_size") != n
             or package.get("encoding") != MODES[mode]["encoding"]):
         raise ValueError("Metadata paket tidak konsisten atau telah diubah.")
-    if package.get("key_fingerprint") != key_fingerprint(key):
+    if not isinstance(key, str) or package.get("key_fingerprint") != key_fingerprint(key):
         raise ValueError("Kata kunci tidak cocok dengan ciphertext.")
+    if package_format == PACKAGE_FORMAT:
+        if package.get("auth") != "HMAC-SHA256-SCRYPT":
+            raise ValueError("Metode autentikasi paket tidak dikenali.")
+        try:
+            salt = base64.b64decode(package["auth_salt_b64"], validate=True)
+            supplied_tag = package["auth_tag"]
+        except Exception as exc:
+            raise ValueError("Metadata autentikasi paket rusak atau tidak lengkap.") from exc
+        if len(salt) != 16 or not isinstance(supplied_tag, str):
+            raise ValueError("Metadata autentikasi paket tidak valid.")
+        auth_key = _derive_package_auth_key(key, salt)
+        expected_tag = hmac.new(auth_key, _canonical_package_bytes(package), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(supplied_tag, expected_tag):
+            raise ValueError("Integritas paket gagal: metadata atau ciphertext telah berubah.")
     try:
         ciphertext = base64.b64decode(package["ciphertext_b64"], validate=True)
     except Exception as exc:
@@ -197,4 +240,8 @@ def decrypt_package(package, key):
         "modulus": modulus,
         "original_bytes": len(raw),
         "ciphertext_bytes": len(ciphertext),
+        "key_source": package.get("key_source", "UNKNOWN"),
+        "package_version": package.get("version", 3),
+        "integrity_verified": package_format == PACKAGE_FORMAT,
     }
+

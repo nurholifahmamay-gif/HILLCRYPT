@@ -104,3 +104,7 @@ Use a vetted authenticated encryption scheme such as AES-GCM or ChaCha20-Poly130
 - Temporary session memory cleanup.
 - Copyright notice.
 - Correct round-trip equation and expanded symbol explanations.
+
+
+## v5.1 — Perbaikan alur dua format
+Hasil enkripsi terakhir otomatis disinkronkan ke menu Dekripsi untuk paket `.hce` dan Base64. Base64 yang dikenal dalam sesi yang sama diperiksa fingerprint dan metadatanya; Base64 eksternal tetap ditandai belum terverifikasi. Lihat `IMPLEMENTASI_V5_1.md`.
