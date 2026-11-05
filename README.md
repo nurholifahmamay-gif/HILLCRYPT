@@ -1,110 +1,82 @@
-# HILLCRYPT 4.2 — Refined Unified Edition
+# HILLCRYPT v5.2 — Educational Content Expansion
 
 Interactive matrix-cryptography learning application built with Python and Streamlit.
 
-HILLCRYPT 4.2 preserves the visual identity and working encryption/decryption core of v4.0 while refining the exact interface and learning features requested by the user.
+HILLCRYPT v5.2 preserves the v5.1 encryption/decryption workflow and expands the learning area into ten structured chapters in Indonesian and English. This release is prepared on the development branch for review; it is not yet the production release until the pull request is reviewed, merged, and the hosted app is verified.
 
-## Features
+## Core application features retained from v5.1
 
 - Indonesian and English interface.
-- Three byte encodings:
-  - **ASCII Standard:** codes 0–127, modulus 128.
-  - **Windows-1252:** one-byte CP1252 encoding, modulus 256. Undefined byte positions are 129, 141, 143, 144, and 157.
-  - **UTF-8 / Unicode:** UTF-8 bytes, modulus 256; supports emoji and non-Latin scripts.
-- Configurable square key matrix order **n × n**, from 1 to 16, with explicit visible minus/plus controls.
-- Customizable passphrase. Encryption and decryption must use the same passphrase, matrix order, and encoding.
-- Automatic modular invertibility validation and modular inverse calculation.
-- Long plaintext, multiline text, and `.txt` uploads.
-- Live character and encoded-byte count while entering plaintext.
-- Separate copy-ready Base64 ciphertext output and retained expandable HILLCRYPT JSON package.
-- Downloadable `.hce`/JSON package and raw Base64 `.txt`.
-- Decryption from complete HILLCRYPT package, with encoding, matrix order, and original byte length read from package metadata.
-- Legacy/raw Base64 decryption remains available.
-- Matrix laboratory with key matrix, inverse matrix, identity check, manual matrix multiplication modulo m, and manual K × P vector calculation.
-- Weighted directed graph visualization derived from the key matrix (nonzero Kᵢⱼ entries become directed weighted edges).
-- Searchable ASCII 0–127 and Windows-1252 128–255 code table, including decimal, hexadecimal, binary, character, and type.
-- Expanded learning materials covering Hill Cipher, modular arithmetic, encodings, padding, passphrase handling, graph representation, and security limitations.
+- ASCII Standard (0–127, modulus 128), Windows-1252 (single-byte CP1252, modulus 256), and UTF-8/Unicode (UTF-8 bytes, modulus 256).
+- Configurable square key matrix order n × n, from 1 to 16.
+- Customizable passphrase and modular invertibility validation.
+- Encryption and decryption using the Hill matrix transformation.
+- HCE/JSON package and raw Base64 output.
+- Metadata-aware decryption, key fingerprint checks, and package integrity verification as implemented in v5.1.
+- Matrix laboratory, key/inverse inspection, modular multiplication, and vector calculation.
+- Weighted directed graph visualization and Graph Key Lab.
+- Activity history and system tests.
+
+## v5.2 learning expansion
+
+The Learn Cryptography page contains ten chapters, each with learning objectives, concept explanations, mathematical formulas, worked examples, and a short multiple-choice assessment:
+
+1. Cryptography foundations.
+2. Linear algebra foundations.
+3. Modular arithmetic and multiplicative inverses.
+4. Hill Cipher and modular invertibility.
+5. Worked encryption/decryption calculation.
+6. ASCII, Windows-1252, UTF-8, characters, and bytes.
+7. Blocks, zero padding, Base64, and HCE packages.
+8. Matrices, directed graphs, and Graph Key Lab.
+9. Security analysis and limitations of classical Hill Cipher.
+10. HILLCRYPT practical lab and round-trip assessment.
+
+The learning material is available in Indonesian and English. Examples explicitly distinguish the illustrative modulo-26 alphabet model from the application's byte-based modes (modulo 128 or 256).
 
 ## Mathematical model
 
-For plaintext column vector \(\mathbf{p}\), ciphertext column vector \(\mathbf{c}\), key matrix \(K\), and encoding modulus \(m\):
+For a plaintext column vector P, ciphertext column vector C, key matrix K, and modulus m:
 
-**Encryption**
+`C ≡ KP (mod m)`
 
-\[
-\mathbf{c} \equiv K\mathbf{p} \pmod m
-\]
+`P ≡ K⁻¹C (mod m)`
 
-**Decryption**
+The key matrix is invertible modulo m if and only if:
 
-\[
-\mathbf{p} \equiv K^{-1}\mathbf{c} \pmod m
-\]
+`gcd(det(K), m) = 1`
 
-**Invertibility condition**
+When this condition holds:
 
-\[
-\gcd(\det(K),m)=1
-\]
+`K⁻¹ ≡ (det K)⁻¹ adj(K) (mod m)`
 
-When the condition holds, the modular inverse can be expressed as:
+This condition is important for composite moduli such as 128 and 256. A nonzero determinant alone is not sufficient.
 
-\[
-K^{-1} \equiv (\det K)^{-1}\operatorname{adj}(K) \pmod m
-\]
+## Important encoding and package notes
 
-A complete plaintext is restored block-by-block. If the final byte block is incomplete, zero padding is added during encryption and removed using the original byte length stored in the package.
-
-## Important note about automatic byte length
-
-For a complete `.hce`/JSON package, the original byte length is read automatically. Raw Base64 ciphertext alone does **not** contain the original plaintext byte length. Because the final block may have zero padding, that original length cannot be inferred uniquely from raw Base64. Therefore, raw Base64 mode retains a manual original-byte-length field for exact recovery. For easier use, share the complete `.hce` package.
-
-## Run on Windows
-
-1. Install Python 3.10 or newer from https://www.python.org/downloads/.
-2. During setup, enable **Add Python to PATH**.
-3. Extract the ZIP.
-4. Open the extracted `HILLCRYPT_v4_2` folder.
-5. Double-click `INSTALL_DEPENDENCIES.bat` once.
-6. After installation finishes, double-click `RUN_HILLCRYPT.bat`.
-7. Open the local URL shown in the terminal, usually `http://localhost:8501`.
-
-Manual commands:
-
-```bash
-python -m pip install -r requirements.txt
-python -m streamlit run app.py
-```
-
-## Public access from Windows, Android, iOS, and other devices
-
-`localhost` is available only on the computer running the application. To access HILLCRYPT from anywhere, deploy the project to a public Streamlit-compatible host (for example, Streamlit Community Cloud) and use the public URL from a browser. On Android or iOS, the URL can be added to the home screen.
-
-This is a responsive web application, not a native APK, IPA, or EXE. When hosted publicly, submitted text is processed by the hosting server. Do not submit confidential data.
-
-## Educational graph visualization
-
-The graph panel interprets the current key matrix as a weighted directed adjacency matrix:
-- Matrix index i corresponds to vertex vᵢ.
-- A nonzero entry Kᵢⱼ creates a directed edge vᵢ → vⱼ.
-- The edge label is the entry reduced modulo m.
-
-This is an educational visualization connecting matrices and graph theory; it is not a claim that Hill Cipher itself requires graph traversal.
+- ASCII Standard supports byte values 0–127.
+- Windows-1252 uses one byte for supported CP1252 characters; undefined byte positions are 129, 141, 143, 144, and 157.
+- UTF-8 represents a Unicode code point using one to four bytes. Character count and byte count may therefore differ.
+- If the byte count is not divisible by the matrix order n, zero padding is appended. The original byte length is needed to remove padding exactly.
+- Base64 is only a byte-to-text representation. Raw Base64 does not carry encoding, matrix order, or original plaintext length.
+- The HCE/JSON package is the recommended format when the metadata is needed for decryption.
 
 ## Security limitations
 
-Hill Cipher is a classical linear cipher. It is vulnerable to known-plaintext and other cryptanalytic attacks, provides no authentication, and is not suitable for protecting confidential data. The deterministic passphrase-to-matrix derivation is intended for reproducible education, not modern password-based key derivation. The package key fingerprint detects key mismatch but is not a message authentication code.
+The Hill Cipher is a classical linear cipher and is vulnerable to known-plaintext and other cryptanalytic attacks. It is an educational tool, not a modern secure encryption scheme. Package integrity checks do not remove the underlying cryptographic weaknesses of Hill Cipher. Do not submit confidential information to a publicly hosted educational application. Use a vetted authenticated encryption scheme such as AES-GCM or ChaCha20-Poly1305 for real confidentiality and integrity requirements.
 
-Use a vetted authenticated encryption scheme such as AES-GCM or ChaCha20-Poly1305 for real confidentiality and integrity requirements.
+## Run locally on Windows
 
+1. Install Python 3.10 or newer.
+2. Extract the project ZIP.
+3. Install dependencies with `python -m pip install -r requirements`.
+4. Run `python -m streamlit run app.py`.
+5. Open the local URL shown by Streamlit, usually `http://localhost:8501`.
 
-## HILLCRYPT 4.2 additions
-- Operation-specific weighted bipartite graph for the latest encryption/decryption block.
-- Session history and manual deletion controls.
-- Temporary session memory cleanup.
-- Copyright notice.
-- Correct round-trip equation and expanded symbol explanations.
+## Tests
 
+Run the automated test suite from the project root:
 
-## v5.1 — Perbaikan alur dua format
-Hasil enkripsi terakhir otomatis disinkronkan ke menu Dekripsi untuk paket `.hce` dan Base64. Base64 yang dikenal dalam sesi yang sama diperiksa fingerprint dan metadatanya; Base64 eksternal tetap ditandai belum terverifikasi. Lihat `IMPLEMENTASI_V5_1.md`.
+`python -m unittest discover -s tests -v`
+
+Manual acceptance testing is still required for the Streamlit interface, HCE file upload/download, session synchronization, and public hosting behavior.
