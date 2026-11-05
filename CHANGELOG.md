@@ -13,3 +13,20 @@ Base64 mentah tidak membawa metadata/fingerprint. Jika Base64 berasal dari luar 
 
 ## Fitur yang dipertahankan
 Graph Key Lab, Laboratorium Matriks, mode ASCII/Windows-1252/UTF-8, ordo matriks 1–16, riwayat aktivitas, pembelajaran, pengujian sistem, dan ekspor Base64 serta `.hce`.
+
+
+# HILLCRYPT v5.2 — Educational Content Expansion (development)
+
+## Identitas dan konsistensi
+- Memperbarui identitas antarmuka dan halaman Tentang menjadi v5.2.
+- Memperbarui judul halaman browser dan keterangan versi di sidebar.
+
+## Pengembangan pembelajaran
+- Menambahkan sepuluh bab pembelajaran dalam Bahasa Indonesia dan Inggris.
+- Setiap bab memuat tujuan pembelajaran, konsep inti, rumus, contoh pembahasan, dan evaluasi pilihan ganda.
+- Materi mencakup dasar kriptografi, aljabar linear, aritmetika modular, Hill Cipher, encoding, padding dan HCE, teori graf, keamanan, serta praktikum.
+- Contoh modulo 26 diberi penanda sebagai ilustrasi alfabet, bukan mode byte aplikasi.
+- Menjelaskan perbedaan unimodular (determinannya ±1) dan invertibilitas modulo m (gcd(det(K),m)=1).
+
+## Catatan status
+Perubahan ini berada pada branch pengembangan. Pengujian otomatis dan manual serta verifikasi deployment publik harus dilakukan sebelum merge ke main dan rilis produksi.
