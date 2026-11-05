@@ -1,17 +1,15 @@
-# HILLCRYPT 4.2 – Graph, History & Copyright Edition
+# HILLCRYPT v5.1 — Integrated Flow Fix
 
-- Corrected the round-trip equation to D_K(E_K(P)) ≡ P (mod m).
-- Added encryption/decryption component equations and symbol explanations.
-- Added operation-specific directed weighted bipartite graph for the latest operation.
-- Preserved the existing key-matrix graph.
-- Added session activity history and manual deletion of one/all entries.
-- Added temporary-memory cleanup for history, last operation graph, temporary input/result keys, and Streamlit caches.
-- Added application copyright notice.
-- Added History navigation in Indonesian and English.
-- Expanded the manual matrix calculator order selector.
+## Perbaikan alur enkripsi/dekripsi
+- Hasil enkripsi terbaru disimpan sebagai satu artefak sesi dan otomatis disinkronkan ke input paket `.hce` serta input Base64 pada menu Dekripsi.
+- Hasil dekripsi lama dibersihkan ketika enkripsi baru berhasil dibuat.
+- Jalur `.hce` tetap memverifikasi fingerprint kunci, metadata, dan HMAC integritas.
+- Jalur Base64 memeriksa fingerprint dan metadata jika ciphertext sama dengan hasil enkripsi terakhir pada sesi aplikasi yang sama.
+- Base64 eksternal/yang tidak dikenali tetap dapat dihitung, tetapi hasilnya diberi status **belum terverifikasi**, bukan diklaim valid.
+- Perubahan kunci, encoding, ordo matriks, atau panjang byte terdeteksi untuk Base64 yang dikenali dari sesi saat ini.
 
-## Privacy
-History stores metadata only (time, operation, encoding, matrix order, character/byte counts, status). It does not store plaintext, ciphertext, or passphrases. Session data is temporary.
+## Batasan yang disengaja
+Base64 mentah tidak membawa metadata/fingerprint. Jika Base64 berasal dari luar sesi atau aplikasi ditutup lalu dibuka kembali, kecocokan kunci tidak dapat dibuktikan dari Base64 saja. Gunakan paket `.hce` untuk verifikasi kuat.
 
-## Compatibility
-Existing HILLCRYPT package format, key derivation, ASCII, Windows-1252, UTF-8, and cipher operations are retained. Hill Cipher is for education, not confidential-data protection.
+## Fitur yang dipertahankan
+Graph Key Lab, Laboratorium Matriks, mode ASCII/Windows-1252/UTF-8, ordo matriks 1–16, riwayat aktivitas, pembelajaran, pengujian sistem, dan ekspor Base64 serta `.hce`.

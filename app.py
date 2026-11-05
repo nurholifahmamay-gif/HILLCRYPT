@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
@@ -6,14 +7,20 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from graph_key_lab import (
+    SUPPORTED_ORDERS, GraphKeyError, adjacency_matrix, bipartite_unimodular_graph, complete_graph,
+    decrypt_bytes as graph_decrypt_bytes, encrypt_bytes as graph_encrypt_bytes,
+    path_graph, unique_perfect_matching_tree, validate_adjacency, derive_graph_passphrase,
+)
+
 from hill_cipher import (
-    MODES, create_package, decrypt_package, decode_plaintext,
+    MODES, create_package, decrypt_package, decode_plaintext, key_fingerprint,
     encode_plaintext, derive_key_matrix, matrix_inverse_mod,
     matrix_determinant, decrypt_bytes
 )
 
 st.set_page_config(
-    page_title="HILLCRYPT 4.2 | Matrix Cryptography",
+    page_title="HILLCRYPT 5.1 | Matrix Cryptography",
     page_icon="🔐",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -22,7 +29,7 @@ st.set_page_config(
 # ---------- Language ----------
 LANG = {
 "id": {
- "home":"Beranda","enc":"Enkripsi","dec":"Dekripsi","lab":"Laboratorium Matriks",
+ "home":"Beranda","enc":"Enkripsi","dec":"Dekripsi","lab":"Laboratorium Matriks","graphkey":"GRAPH KEY LAB",
  "learn":"Belajar Kriptografi","test":"Uji Sistem","about":"Tentang",
  "encoding":"Mode Encoding","matrix":"Pengaturan Matriks","order":"Ordo matriks (n × n)",
  "key":"Kata kunci (passphrase)","system":"Informasi Sistem","hero":"Platform Pembelajaran Kriptografi Matriks",
@@ -131,7 +138,7 @@ LANG = {
  "cross_device":"Akses lintas perangkat","cross_device_desc":"Publikasikan proyek Streamlit ini ke hosting publik agar dapat diakses melalui browser dari Windows, Android, iOS, dan perangkat lain. Tambahkan URL publik ke layar utama ponsel agar terasa seperti aplikasi.",
 },
 "en": {
- "home":"Home","enc":"Encryption","dec":"Decryption","lab":"Matrix Laboratory",
+ "home":"Home","enc":"Encryption","dec":"Decryption","lab":"Matrix Laboratory","graphkey":"GRAPH KEY LAB",
  "learn":"Learn Cryptography","test":"System Test","about":"About",
  "encoding":"Encoding Mode","matrix":"Matrix Settings","order":"Matrix order (n × n)",
  "key":"Key / Passphrase","system":"System Information","hero":"Matrix Cryptography Learning Platform",
@@ -328,13 +335,22 @@ hr {{ border-color:rgba(91,130,160,.25); }}
 st.markdown(f"""
 <div class="hero">
  <div class="eyebrow">{tr("hero_eyebrow")}</div>
- <h1>HILLCRYPT <span style="color:#71d7e7;font-size:1.05rem">v4.2</span></h1>
+ <h1>HILLCRYPT <span style="color:#71d7e7;font-size:1.05rem">v5.1</span></h1>
  <p>{tr('hero')}</p>
  <p style="font-size:.9rem;margin-top:.65rem">{tr("hero_tagline")}</p>
 </div>""", unsafe_allow_html=True)
 
+def _apply_graph_passphrase(passphrase: str, graph_order: int) -> None:
+    """Apply a validated graph-derived passphrase to the main Hill Cipher."""
+    st.session_state["global_key"] = passphrase
+    st.session_state["matrix_order"] = int(graph_order)
+    st.session_state["graph_key_active"] = True
+    st.session_state["graph_key_passphrase"] = passphrase
+    st.session_state["page_key"] = "enc"
+
+
 # ---------- Navigation and global settings ----------
-page_keys = ["home","enc","dec","lab","learn","test","history","about"]
+page_keys = ["home","enc","dec","lab","graphkey","learn","test","history","about"]
 nav_labels = [tr(k) for k in page_keys]
 if "page_key" not in st.session_state:
     st.session_state.page_key = "home"
@@ -379,8 +395,13 @@ with st.sidebar:
                   on_click=lambda: setattr(st.session_state, "matrix_order", min(16, st.session_state.matrix_order+1)))
     n = int(st.session_state.matrix_order)
     st.caption(tr("order") + f": {n} × {n} · 1–16")
-    key = st.text_input(tr("key"),value="THEKINGOFGEMINOR",type="default",key="global_key")
-    st.caption(tr("key_help"))
+    if "global_key" not in st.session_state:
+        st.session_state["global_key"] = "THEKINGOFGEMINOR"
+    key = st.text_input(tr("key"),type="default",key="global_key")
+    if st.session_state.get("graph_key_active") and key == st.session_state.get("graph_key_passphrase"):
+        st.caption("Sumber kata kunci: GRAPH KEY LAB. Kata kunci ini dapat digunakan kembali untuk dekripsi." if st.session_state.language == "id" else "Key source: GRAPH KEY LAB. Reuse this passphrase for decryption.")
+    else:
+        st.caption(tr("key_help"))
     st.divider()
     st.markdown(f"### ⓘ {tr('system')}")
     st.markdown(f"""
@@ -391,7 +412,7 @@ with st.sidebar:
     {tr('block')}: <b>{n} {tr('bytes')}</b>
     </div>""",unsafe_allow_html=True)
     st.divider()
-    st.caption("HILLCRYPT v4.2 · Aplikasi Web Responsif" if st.session_state.language=="id" else "HILLCRYPT v4.2 · Responsive Web App")
+    st.caption("HILLCRYPT v5.1 · Aplikasi Web Responsif" if st.session_state.language=="id" else "HILLCRYPT v5.1 · Responsive Web App")
 
 m = MODES[mode]["modulus"]
 
@@ -491,15 +512,35 @@ elif page_key == "enc":
         except Exception as exc:
             st.error(str(exc))
             matrix=None
-        uploaded=st.file_uploader(tr("upload_plain"),type=["txt"],key="enc_upload")
     with right:
-        text=st.text_area(tr("plain"),height=245,placeholder="Write any message, paragraph, or long text here…",key="plain_input")
+        st.markdown("#### "+("Masukkan plaintext" if st.session_state.language=="id" else "Enter plaintext"))
+        uploaded=st.file_uploader(
+            tr("upload_plain"),
+            type=["txt"],
+            key="enc_upload",
+            help=("Unggah file .txt. Pastikan encoding file sesuai dengan mode encoding yang dipilih."
+                  if st.session_state.language=="id" else
+                  "Upload a .txt file. Make sure its encoding matches the selected encoding mode.")
+        )
         if uploaded is not None:
             try:
-                text=decode_plaintext(uploaded.getvalue(),mode)
+                uploaded_bytes = uploaded.getvalue()
+                upload_fingerprint = hashlib.sha256(uploaded_bytes).hexdigest()
+                if st.session_state.get("plain_upload_fingerprint") != upload_fingerprint:
+                    st.session_state["plain_input"] = decode_plaintext(uploaded_bytes, mode)
+                    st.session_state["plain_upload_fingerprint"] = upload_fingerprint
                 st.success(f"{tr('loaded_file')}: {uploaded.name}")
             except Exception as exc:
-                st.error(str(exc)); text=""
+                st.error(str(exc))
+        else:
+            st.session_state.pop("plain_upload_fingerprint", None)
+
+        text=st.text_area(
+            tr("plain"),
+            height=245,
+            placeholder="Write any message, paragraph, or long text here…",
+            key="plain_input"
+        )
         try:
             byte_count=len(encode_plaintext(text,mode)) if text else 0
         except Exception as exc:
@@ -513,8 +554,25 @@ elif page_key == "enc":
             st.caption(tr("empty_text"))
     if st.button("🔐 "+tr("encrypt_now"),type="primary",use_container_width=True,disabled=(not bool(text) or matrix is None)):
         try:
-            package,info=create_package(text,key,int(n),mode)
+            package,info=create_package(text,key,int(n),mode, "GRAPH_KEY_LAB" if (st.session_state.get("graph_key_active") and key == st.session_state.get("graph_key_passphrase")) else "MANUAL")
             raw_json=json.dumps(package,ensure_ascii=False,indent=2)
+            # Keep one authoritative record for the most recent encryption.
+            # Both decryption input routes are pre-filled from this exact artifact.
+            st.session_state["last_encrypt_package"] = package
+            st.session_state["last_encrypt_package_json"] = raw_json
+            st.session_state["last_encrypt_base64"] = package["ciphertext_b64"]
+            st.session_state["last_encrypt_key_fingerprint"] = package["key_fingerprint"]
+            st.session_state["last_encrypt_metadata"] = {
+                "mode": mode, "matrix_order": int(n), "modulus": int(m),
+                "original_byte_length": int(package["original_byte_length"]),
+                "key_source": package.get("key_source", "UNKNOWN"),
+            }
+            st.session_state["package_input"] = raw_json
+            st.session_state["raw_b64_input"] = package["ciphertext_b64"]
+            st.session_state["dec_raw_length"] = int(package["original_byte_length"])
+            # A fresh encryption invalidates visible results from an older run.
+            st.session_state.pop("restored_package", None)
+            st.session_state.pop("restored_raw", None)
             raw_input=encode_plaintext(text,mode)
             padded=raw_input+(b"\x00"*((-len(raw_input))%int(n)))
             cipher_bytes=base64.b64decode(package["ciphertext_b64"])
@@ -547,6 +605,8 @@ elif page_key == "dec":
         with c1:
             uploaded=st.file_uploader(tr("upload_cipher"),type=["hce","json"],key="dec_upload")
             pasted=st.text_area(tr("cipher"),height=230,placeholder=tr("paste"),key="package_input")
+            if st.session_state.get("last_encrypt_package") and not uploaded:
+                st.caption("Paket otomatis disinkronkan dari enkripsi terakhir pada sesi ini. Kamu tetap dapat menggantinya dengan paket lain." if st.session_state.language=="id" else "The latest package from this session is synced automatically. You can replace it with another package.")
         with c2:
             st.markdown("#### "+tr("result"))
             st.caption(tr("copy_hint"))
@@ -618,20 +678,38 @@ elif page_key == "dec":
                 except Exception as exc:
                     st.error(str(exc))
         st.info(tr("copy_hint"))
+        st.caption("Paket .hce v4 memverifikasi kecocokan kunci dan integritas metadata/ciphertext. Paket v3 lama tetap dapat dibaca, tetapi belum memiliki autentikasi integritas.")
     else:
         st.info(tr("raw_info"))
-        raw_text=st.text_area(tr("raw_b64"),height=160,placeholder=tr("raw_placeholder"))
+        st.warning("Base64 mentah tidak membawa fingerprint kunci atau metadata autentikasi. Dekripsi dengan kunci yang berbeda tetap dapat dihitung secara matematis dan mungkin menghasilkan teks acak; gunakan paket .hce untuk verifikasi kecocokan kunci dan integritas.")
+        raw_text=st.text_area(tr("raw_b64"),height=160,placeholder=tr("raw_placeholder"),key="raw_b64_input")
         original_len=st.number_input(tr("original_len"),min_value=0,value=0,step=1)
         if st.button("🔓 "+tr("decrypt_now"),type="primary",use_container_width=True,disabled=not raw_text.strip(),key="dec_raw"):
             try:
-                ciphertext=base64.b64decode("".join(raw_text.split()),validate=True)
+                compact_input="".join(raw_text.split())
+                ciphertext=base64.b64decode(compact_input,validate=True)
+                # If this Base64 matches the latest in-session encryption, we have
+                # trustworthy local metadata and can reject a changed key/config.
+                known_b64=st.session_state.get("last_encrypt_base64")
+                known_meta=st.session_state.get("last_encrypt_metadata") or {}
+                is_known=bool(known_b64 and compact_input==known_b64)
+                if is_known:
+                    if st.session_state.get("last_encrypt_key_fingerprint") != key_fingerprint(key):
+                        raise ValueError("Kata kunci tidak cocok dengan ciphertext hasil enkripsi terakhir.")
+                    if (known_meta.get("mode")!=mode or known_meta.get("matrix_order")!=int(n)
+                            or known_meta.get("modulus")!=int(m)
+                            or known_meta.get("original_byte_length")!=int(original_len)):
+                        raise ValueError("Konfigurasi dekripsi tidak cocok dengan metadata enkripsi terakhir. Periksa encoding, ordo matriks, dan panjang byte asli.")
                 raw=decrypt_bytes(ciphertext,key,int(n),m,int(original_len))
                 plaintext=decode_plaintext(raw,mode)
                 raw_graph=raw+(b"\x00"*max(0,int(n)-len(raw)))
                 invmat=matrix_inverse_mod(derive_key_matrix(key,int(n),m),m)
                 record_last_operation("decrypt",ciphertext[:int(n)],raw_graph[:int(n)],invmat,int(n),m,mode)
                 add_history("Dekripsi" if st.session_state.language=="id" else "Decryption",mode,int(n),len(plaintext),len(raw))
-                st.success(tr("success_dec"))
+                if is_known:
+                    st.success("Dekripsi berhasil. Kunci dan konfigurasi cocok dengan enkripsi terakhir pada sesi ini." if st.session_state.language=="id" else "Decryption successful. Key and settings match the latest encryption in this session.")
+                else:
+                    st.warning("Perhitungan dekripsi selesai, tetapi kecocokan kunci tidak dapat diverifikasi karena Base64 mentah tidak menyimpan fingerprint. Periksa apakah plaintext hasilnya benar. Untuk verifikasi kuat, gunakan paket .hce." if st.session_state.language=="id" else "Decryption was computed, but key matching cannot be verified because raw Base64 has no key fingerprint. Check whether the plaintext is correct. Use the .hce package for strong verification.")
                 st.text_area(tr("result"),plaintext,height=220,key="restored_raw")
                 st.download_button("⬇ "+tr("download_text"),plaintext.encode("utf-8"),"HILLCRYPT_plaintext.txt","text/plain",use_container_width=True)
             except Exception as exc:
@@ -814,6 +892,198 @@ elif page_key == "learn":
         q=search_ascii.casefold()
         ascii_df=ascii_df[ascii_df.apply(lambda row:any(q in str(v).casefold() for v in row),axis=1)]
     st.dataframe(ascii_df,use_container_width=True,hide_index=True,height=420)
+
+
+elif page_key == "graphkey":
+    banner("GRAPH KEY LAB", "Matriks ketetanggaan graf menjadi sumber pembentukan kata kunci Hill Cipher.")
+    st.info("Graf valid menghasilkan passphrase secara deterministik. Passphrase tersebut diteruskan ke menu Enkripsi dan Dekripsi untuk membentuk matriks kunci Hill Cipher.")
+    st.markdown("### 1. Pembentukan graf")
+    method = st.radio("Metode pembentukan", ["Otomatis", "Manual"], horizontal=True, key="gkl_method")
+    order = st.selectbox("Ordo graf (n × n)", SUPPORTED_ORDERS, index=3, key="gkl_order")
+    matrix = None
+    if method == "Otomatis":
+        if order % 2 == 0:
+            generator_options = [
+                "Graf lintasan Pₙ",
+                "Graf lengkap Kₙ",
+                "Pohon dengan perfect matching tunggal",
+                "Graf bipartit unimodular",
+            ]
+        else:
+            generator_options = ["Graf lintasan Pₙ", "Graf lengkap Kₙ"]
+            st.info(
+                "Ordo ganjil tetap dapat diuji. Untuk graf sederhana tak berarah, "
+                "determinan matriks ketetanggaan berordo ganjil selalu genap, "
+                "sehingga tidak dapat memenuhi syarat unimodular ±1. Sistem tetap "
+                "menghitung determinan untuk keperluan eksplorasi."
+            )
+        generator = st.selectbox("Pilih generator", generator_options, key="gkl_generator")
+        if generator == "Graf lintasan Pₙ":
+            matrix = path_graph(order)
+        elif generator == "Graf lengkap Kₙ":
+            matrix = complete_graph(order)
+        elif generator == "Pohon dengan perfect matching tunggal":
+            matrix = unique_perfect_matching_tree(order)
+        else:
+            matrix = bipartite_unimodular_graph(order)
+    else:
+        st.caption("Masukkan sisi sebagai pasangan nomor simpul mulai dari 1. Contoh untuk P4: 1-2, 2-3, 3-4.")
+        edge_text = st.text_area("Daftar sisi", "1-2, 2-3, 3-4", key="gkl_edges")
+        if st.button("Bentuk matriks ketetanggaan", key="gkl_build"):
+            try:
+                edges = []
+                for item in edge_text.split(","):
+                    item = item.strip()
+                    if not item:
+                        continue
+                    pair = item.split("-")
+                    if len(pair) != 2:
+                        raise GraphKeyError("Format sisi harus berupa u-v, dipisahkan koma.")
+                    edges.append((int(pair[0].strip())-1, int(pair[1].strip())-1))
+                st.session_state["gkl_manual_matrix"] = adjacency_matrix(order, edges)
+                st.session_state["gkl_manual_order"] = order
+            except Exception as exc:
+                st.error(str(exc))
+        if st.session_state.get("gkl_manual_order") == order:
+            matrix = st.session_state.get("gkl_manual_matrix")
+    if matrix is not None:
+        report = validate_adjacency(matrix)
+        st.markdown("### 2. Matriks ketetanggaan")
+        st.dataframe(pd.DataFrame(matrix, index=[f"v{i+1}" for i in range(order)],
+                                  columns=[f"v{i+1}" for i in range(order)]),
+                     use_container_width=True)
+        st.markdown("### 3. Visualisasi graf")
+        # Bangun graf tak berarah langsung dari matriks ketetanggaan.
+        # Gunakan ID simpul eksplisit dan latar putih agar hasil konsisten
+        # pada berbagai tema Streamlit.
+        dot = [
+            "graph G {",
+            '  graph [bgcolor="#ffffff", pad="0.35", rankdir=LR, splines=true];',
+            '  node [shape=circle, style=filled, fillcolor="#dff4fb", '
+            'color="#2786a5", fontcolor="#123653", penwidth=1.5, width=0.75, height=0.75];',
+            '  edge [color="#39758a", penwidth=1.8];',
+        ]
+        for i in range(order):
+            dot.append(f'  v{i+1} [label="v{i+1}"];')
+        for i in range(order):
+            for j in range(i + 1, order):
+                if int(matrix[i][j]) != 0:
+                    dot.append(f"  v{i+1} -- v{j+1};")
+        dot.append("}")
+        st.graphviz_chart("\n".join(dot), use_container_width=True)
+        st.markdown("### 4. Validasi kunci graf")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Ordo", f"{order} × {order}")
+        col2.metric("Determinan eksak", str(report["determinant"]))
+        col3.metric("Status", "VALID" if report["is_hill_key"] else "TIDAK VALID")
+        if report["is_hill_key"]:
+            st.success("Graf memenuhi syarat: determinan tepat +1 atau −1.")
+            graph_passphrase = derive_graph_passphrase(matrix)
+            st.markdown("### 5. Kata kunci yang dibentuk dari graf")
+            st.caption("Passphrase dibentuk dari fingerprint SHA-256 atas ordo dan seluruh entri matriks ketetanggaan. Graf yang sama menghasilkan passphrase yang sama.")
+            st.code(graph_passphrase, language=None)
+            st.button(
+                "Gunakan kata kunci graf pada HILLCRYPT",
+                type="primary",
+                key="gkl_apply_passphrase",
+                on_click=_apply_graph_passphrase,
+                args=(graph_passphrase, order),
+                use_container_width=True,
+            )
+            st.info("Saat tombol ditekan, kata kunci graf akan mengisi passphrase utama, menyamakan ordo matriks, lalu membuka menu Enkripsi. Gunakan passphrase yang sama dan ordo yang sama saat dekripsi.")
+            st.markdown("### 6. Uji enkripsi dan dekripsi dengan kata kunci graf")
+            st.caption(
+                "Pengujian ini menggunakan passphrase hasil graf sebagai kunci Hill Cipher, "
+                "bukan memakai matriks ketetanggaan secara langsung. Untuk dekripsi, kata kunci "
+                "pada sidebar harus sama dengan passphrase graf."
+            )
+            graph_encoding = st.selectbox("Mode encoding", [
+                "ASCII (mod 128)", "Windows-1252 (mod 256)", "UTF-8 / Unicode (mod 256)"
+            ], index=2, key="gkl_encoding")
+            graph_mode = "ascii" if graph_encoding.startswith("ASCII") else (
+                "windows1252" if graph_encoding.startswith("Windows") else "utf8"
+            )
+            graph_modulus = MODES[graph_mode]["modulus"]
+            graph_text = st.text_area("Plaintext", "HILLCRYPT GRAPH KEY LAB", key="gkl_plain")
+
+            st.session_state.setdefault("gkl_cipher_input", "")
+            st.session_state.setdefault("gkl_original_length_input", 0)
+            st.session_state.setdefault("gkl_decrypt_result", None)
+            st.session_state.setdefault("gkl_graph_key_snapshot", None)
+            st.session_state.setdefault("gkl_package", None)
+
+            current_graph_snapshot = (
+                tuple(tuple(int(v) for v in row) for row in matrix),
+                graph_mode,
+                graph_passphrase,
+            )
+
+            if st.button("Enkripsi dengan kata kunci graf", type="primary", key="gkl_encrypt"):
+                try:
+                    package, package_info = create_package(
+                        graph_text, graph_passphrase, int(order), graph_mode, "GRAPH_KEY_LAB"
+                    )
+                    st.session_state["gkl_package"] = package
+                    st.session_state["gkl_cipher_input"] = package["ciphertext_b64"]
+                    st.session_state["gkl_original_length_input"] = package["original_byte_length"]
+                    st.session_state["gkl_graph_key_snapshot"] = current_graph_snapshot
+                    st.session_state["gkl_decrypt_result"] = None
+                    st.success(
+                        "Enkripsi berhasil menggunakan passphrase graf. "
+                        "Paket menyimpan fingerprint kunci untuk pemeriksaan saat dekripsi."
+                    )
+                except Exception as exc:
+                    st.session_state["gkl_package"] = None
+                    st.session_state["gkl_graph_key_snapshot"] = None
+                    st.session_state["gkl_decrypt_result"] = None
+                    st.error(f"Enkripsi gagal: {exc}")
+
+            cipher_b64 = st.text_area("Ciphertext Base64", key="gkl_cipher_input")
+            original_len = st.number_input(
+                "Panjang byte plaintext asli", min_value=0, step=1,
+                key="gkl_original_length_input"
+            )
+
+            if st.button("Dekripsi ciphertext", key="gkl_decrypt"):
+                try:
+                    saved_package = st.session_state.get("gkl_package")
+                    if not cipher_b64.strip():
+                        raise GraphKeyError("Ciphertext masih kosong. Lakukan enkripsi terlebih dahulu.")
+                    if saved_package is None:
+                        raise GraphKeyError(
+                            "Metadata paket dan fingerprint kunci tidak tersedia. "
+                            "Lakukan enkripsi ulang pada sesi ini atau gunakan paket .hce lengkap."
+                        )
+                    if st.session_state.get("gkl_graph_key_snapshot") != current_graph_snapshot:
+                        raise GraphKeyError(
+                            "Graf atau mode encoding telah berubah. Enkripsi ulang dengan pengaturan saat ini."
+                        )
+                    if cipher_b64.strip() != saved_package.get("ciphertext_b64"):
+                        raise GraphKeyError(
+                            "Ciphertext berubah dari hasil enkripsi yang tersimpan. "
+                            "Lakukan enkripsi ulang atau gunakan paket lengkap yang sesuai."
+                        )
+                    if int(original_len) != int(saved_package.get("original_byte_length", -1)):
+                        raise GraphKeyError("Panjang byte tidak sesuai dengan metadata hasil enkripsi.")
+                    # Intentionally use the current sidebar key here. decrypt_package
+                    # checks its SHA-256 fingerprint against the key used at encryption.
+                    text_result, _ = decrypt_package(saved_package, key)
+                    st.session_state["gkl_decrypt_result"] = text_result
+                    st.success("Dekripsi berhasil. Fingerprint kunci cocok dengan kunci saat enkripsi.")
+                except Exception as exc:
+                    st.session_state["gkl_decrypt_result"] = None
+                    st.error(f"Dekripsi gagal: {exc}")
+
+            if st.session_state.get("gkl_decrypt_result") is not None:
+                st.text_area(
+                    "Hasil dekripsi", st.session_state["gkl_decrypt_result"],
+                    height=120, disabled=True
+                )
+
+        else:
+            st.warning("Graf terbentuk, tetapi tidak dapat menjadi sumber kata kunci karena determinannya bukan +1 atau −1. Coba struktur graf lain atau ordo genap.")
+    else:
+        st.caption("Bentuk graf otomatis atau masukkan daftar sisi untuk melihat matriks dan hasil validasinya.")
 
 elif page_key == "test":
     banner("🧪 "+tr("test"),tr("test_desc"))

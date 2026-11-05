@@ -1,2 +1,1 @@
-HILLCRYPT 4.2 – Graph, History & Copyright Edition
-Based on HILLCRYPT 4.1. Existing cipher implementation and package format retained.
+HILLCRYPT v5.0 — Integrated Validation and Authenticated Package
