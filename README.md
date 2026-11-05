@@ -69,7 +69,7 @@ The Hill Cipher is a classical linear cipher and is vulnerable to known-plaintex
 
 1. Install Python 3.10 or newer.
 2. Extract the project ZIP.
-3. Install dependencies with `python -m pip install -r requirements`.
+3. Install dependencies with `python -m pip install -r requirements.txt`.
 4. Run `python -m streamlit run app.py`.
 5. Open the local URL shown by Streamlit, usually `http://localhost:8501`.
 
